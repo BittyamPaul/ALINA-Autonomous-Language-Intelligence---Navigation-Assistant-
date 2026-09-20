@@ -4,6 +4,7 @@ import {
   VoiceTranscript,
   TranscriptQualityTier,
   WakeWordEvent,
+  VoiceActivityState,
 } from '@alina/shared';
 
 // ============================================================================
@@ -339,14 +340,38 @@ export class EnhancedSpeechRecognitionCoordinator {
   private silenceTimeoutMs = 1500;
   private silenceTimer: ReturnType<typeof setTimeout> | null = null;
   private debugMode = false;
+  private currentActivityState: VoiceActivityState = 'idle';
   private lastQualityRecord?: TranscriptQualityTier;
+  private onActivityStateChange?: (state: VoiceActivityState) => void;
 
-  constructor(options?: { silenceTimeoutMs?: number; debugMode?: boolean }) {
+  constructor(options?: {
+    silenceTimeoutMs?: number;
+    debugMode?: boolean;
+    onActivityStateChange?: (state: VoiceActivityState) => void;
+  }) {
     if (options?.silenceTimeoutMs) {
       this.silenceTimeoutMs = options.silenceTimeoutMs;
     }
     if (options?.debugMode) {
       this.debugMode = options.debugMode;
+    }
+    this.onActivityStateChange = options?.onActivityStateChange;
+  }
+
+  public setActivityStateListener(listener: (state: VoiceActivityState) => void): void {
+    this.onActivityStateChange = listener;
+  }
+
+  public getActivityState(): VoiceActivityState {
+    return this.currentActivityState;
+  }
+
+  private setActivityState(state: VoiceActivityState): void {
+    if (this.currentActivityState !== state) {
+      this.currentActivityState = state;
+      if (this.onActivityStateChange) {
+        this.onActivityStateChange(state);
+      }
     }
   }
 
@@ -421,6 +446,8 @@ export class EnhancedSpeechRecognitionCoordinator {
       this.silenceTimer = null;
     }
 
+    this.setActivityState('user_speaking');
+
     if (event.isFinal) {
       if (event.text.trim()) {
         if (this.rawBuffer) {
@@ -440,7 +467,9 @@ export class EnhancedSpeechRecognitionCoordinator {
     }
 
     if (this.rawBuffer.trim() || this.interimBuffer.trim()) {
+      this.setActivityState('silence');
       this.silenceTimer = setTimeout(() => {
+        this.setActivityState('end_of_utterance');
         this.finalize(onFinalized);
       }, this.silenceTimeoutMs);
     }
@@ -461,7 +490,7 @@ export class EnhancedSpeechRecognitionCoordinator {
   public flush(): VoiceTranscript | null {
     const raw = `${this.rawBuffer} ${this.interimBuffer}`.trim();
     if (!raw) {
-      this.reset();
+      this.reset('idle');
       return null;
     }
 
@@ -483,17 +512,18 @@ export class EnhancedSpeechRecognitionCoordinator {
       isFinal: true,
     };
 
-    this.reset();
+    this.reset('idle');
     return result;
   }
 
-  public reset(): void {
+  public reset(nextState: VoiceActivityState = 'idle'): void {
     this.rawBuffer = '';
     this.interimBuffer = '';
     if (this.silenceTimer) {
       clearTimeout(this.silenceTimer);
       this.silenceTimer = null;
     }
+    this.setActivityState(nextState);
   }
 }
 
@@ -654,3 +684,53 @@ export class AlinaWakeWordDetector {
     this.sensitivity = Math.max(0.1, Math.min(1.0, sensitivity));
   }
 }
+
+// ============================================================================
+// 4. Conversation Lifecycle Phrasing Helpers
+// ============================================================================
+
+export const NATURAL_TERMINATION_PATTERNS: RegExp[] = [
+  /^\s*(that'?s\s+all|that\s+is\s+all)(\s*[,.]?\s*alina)?\s*[.!?]?\s*$/i,
+  /^\s*(good\s*bye|bye|bye\s*bye)(\s*[,.]?\s*alina)?\s*[.!?]?\s*$/i,
+  /^\s*stop\s+listening(\s*[,.]?\s*alina)?\s*[.!?]?\s*$/i,
+  /^\s*(end|close|stop|exit)\s+conversation(\s*[,.]?\s*alina)?\s*[.!?]?\s*$/i,
+];
+
+export function isTerminationPhrase(phrase: string): boolean {
+  const clean = phrase.trim().toLowerCase();
+  if (!clean) return false;
+  return NATURAL_TERMINATION_PATTERNS.some((pattern) => pattern.test(clean));
+}
+
+export function extractCommandAfterWakeWord(
+  transcript: string,
+  wakePhrase = 'hey alina'
+): { isWake: boolean; command?: string } {
+  const clean = transcript.trim();
+  const lower = clean.toLowerCase();
+  const wakeVariants = [wakePhrase.toLowerCase(), 'hey alina', 'alina', 'hey aleena', 'hey elena', 'hi alina'];
+
+  for (const variant of wakeVariants) {
+    if (lower.startsWith(variant)) {
+      const rest = clean.slice(variant.length).replace(/^[,.:;\s]+/, '').trim();
+      return {
+        isWake: true,
+        command: rest.length > 0 ? rest : undefined,
+      };
+    }
+  }
+
+  for (const variant of wakeVariants) {
+    const idx = lower.indexOf(variant);
+    if (idx !== -1 && idx <= 5) {
+      const rest = clean.slice(idx + variant.length).replace(/^[,.:;\s]+/, '').trim();
+      return {
+        isWake: true,
+        command: rest.length > 0 ? rest : undefined,
+      };
+    }
+  }
+
+  return { isWake: false };
+}
+

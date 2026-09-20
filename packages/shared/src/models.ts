@@ -390,6 +390,118 @@ export const WakeWordEventSchema = z.object({
 export type WakeWordEvent = z.infer<typeof WakeWordEventSchema>;
 
 // ============================================================================
+// Voice Conversation Lifecycle & Session Models
+// ============================================================================
+
+export const VoiceConversationModeSchema = z.enum([
+  'wake_mode',
+  'conversation_mode',
+]);
+export type VoiceConversationMode = z.infer<typeof VoiceConversationModeSchema>;
+
+export const VoiceActivityStateSchema = z.enum([
+  'idle',
+  'listening',
+  'user_speaking',
+  'silence',
+  'end_of_utterance',
+  'thinking',
+  'speaking',
+  'interrupted',
+  'error',
+]);
+export type VoiceActivityState = z.infer<typeof VoiceActivityStateSchema>;
+
+export const ConversationSessionStateSchema = z.enum([
+  'wake_mode',
+  'conversation_mode',
+  'awaiting_confirmation',
+  'ended',
+]);
+export type ConversationSessionState = z.infer<typeof ConversationSessionStateSchema>;
+
+export const ConversationTimeoutPolicySchema = z.object({
+  utteranceSilenceMs: z.number().positive().default(1500),
+  inactivityPromptMs: z.number().positive().default(20000),
+  inactivityCloseMs: z.number().positive().default(10000),
+  maxSessionDurationMs: z.number().positive().default(1800000),
+});
+export type ConversationTimeoutPolicy = z.infer<typeof ConversationTimeoutPolicySchema>;
+
+export const VoiceConversationSessionSchema = z.object({
+  session_id: z.string(),
+  started_at: z.string(),
+  last_activity: z.string(),
+  state: ConversationSessionStateSchema,
+  conversation_id: z.string(),
+  voice_enabled: z.boolean().default(true),
+  wake_word_enabled: z.boolean().default(true),
+  timeout_policy: ConversationTimeoutPolicySchema.default({
+    utteranceSilenceMs: 1500,
+    inactivityPromptMs: 20000,
+    inactivityCloseMs: 10000,
+    maxSessionDurationMs: 1800000,
+  }),
+  metadata: z.record(z.unknown()).optional(),
+});
+export type VoiceConversationSession = z.infer<typeof VoiceConversationSessionSchema>;
+
+export const NATURAL_TERMINATION_PATTERNS: RegExp[] = [
+  /^\s*(that'?s\s+all|that\s+is\s+all)(\s*[,.]?\s*alina)?\s*[.!?]?\s*$/i,
+  /^\s*(good\s*bye|bye|bye\s*bye)(\s*[,.]?\s*alina)?\s*[.!?]?\s*$/i,
+  /^\s*stop\s+listening(\s*[,.]?\s*alina)?\s*[.!?]?\s*$/i,
+  /^\s*(end|close|stop|exit)\s+conversation(\s*[,.]?\s*alina)?\s*[.!?]?\s*$/i,
+];
+
+/**
+ * Checks if an utterance is an explicit/natural command to end the voice conversation.
+ */
+export function isTerminationPhrase(phrase: string): boolean {
+  const clean = phrase.trim().toLowerCase();
+  if (!clean) return false;
+  return NATURAL_TERMINATION_PATTERNS.some((pattern) => pattern.test(clean));
+}
+
+/**
+ * Extracts an embedded voice command following a wake-word invocation.
+ * E.g. "Hey Alina, open my project" -> { isWake: true, command: "open my project" }
+ * E.g. "Hey Alina" -> { isWake: true, command: undefined }
+ */
+export function extractCommandAfterWakeWord(
+  transcript: string,
+  wakePhrase = 'hey alina'
+): { isWake: boolean; command?: string } {
+  const clean = transcript.trim();
+  const lower = clean.toLowerCase();
+  const wakeVariants = [wakePhrase.toLowerCase(), 'hey alina', 'alina', 'hey aleena', 'hey elena', 'hi alina'];
+
+  for (const variant of wakeVariants) {
+    if (lower.startsWith(variant)) {
+      const rest = clean.slice(variant.length).replace(/^[,.:;\s]+/, '').trim();
+      return {
+        isWake: true,
+        command: rest.length > 0 ? rest : undefined,
+      };
+    }
+  }
+
+  // Check if wake word appears anywhere in first clause
+  for (const variant of wakeVariants) {
+    const idx = lower.indexOf(variant);
+    if (idx !== -1 && idx <= 5) {
+      const rest = clean.slice(idx + variant.length).replace(/^[,.:;\s]+/, '').trim();
+      return {
+        isWake: true,
+        command: rest.length > 0 ? rest : undefined,
+      };
+    }
+  }
+
+  return { isWake: false };
+}
+
+
+// ============================================================================
 // Knowledge Acquisition System Schemas (3-Layer Architecture)
 // ============================================================================
 

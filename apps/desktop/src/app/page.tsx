@@ -285,6 +285,11 @@ export default function AlinaHomePage() {
   // Handle Voice Interaction
   const {
     voiceState,
+    mode: voiceMode,
+    activityState: voiceActivityState,
+    session: _voiceSession,
+    isConversationActive,
+    inactivityWarning,
     interimTranscript,
     voiceErrorMessage,
     isWakeWordListening,
@@ -293,6 +298,8 @@ export default function AlinaHomePage() {
     transcriptQuality,
     startListening,
     stopListening,
+    startConversation: _startConversation,
+    endConversation,
     interrupt,
     speakSummary,
     clearVoiceError,
@@ -671,24 +678,49 @@ export default function AlinaHomePage() {
           composer={
             <div className="space-y-2">
               <div className="flex items-center justify-between px-1">
-                <StatusIndicator
-                  status={voiceState !== 'idle' ? voiceState : isWakeWordListening ? 'listening' : 'idle'}
-                  label={
-                    voiceState === 'listening'
-                      ? 'Listening to Microphone...'
-                      : voiceState === 'processing'
-                      ? 'Executing Objective...'
-                      : voiceState === 'speaking'
-                      ? 'Speaking Response...'
-                      : voiceState === 'interrupted'
-                      ? 'Interrupted'
-                      : voiceState === 'error'
-                      ? 'Voice Fallback Active'
-                      : isWakeWordListening
-                      ? 'Listening for "Hey Alina"...'
-                      : 'ALINA Ready'
-                  }
-                />
+                <div className="flex items-center space-x-2">
+                  <StatusIndicator
+                    status={voiceState !== 'idle' ? voiceState : isWakeWordListening ? 'listening' : 'idle'}
+                    label={
+                      inactivityWarning
+                        ? 'Are you still there? (Waiting for response)'
+                        : isConversationActive
+                        ? voiceActivityState === 'user_speaking'
+                          ? 'User Speaking...'
+                          : voiceActivityState === 'silence'
+                          ? 'Listening (Pause detected)...'
+                          : voiceActivityState === 'thinking'
+                          ? 'ALINA Thinking...'
+                          : voiceActivityState === 'speaking'
+                          ? 'Speaking Response...'
+                          : 'Conversation Active • Hands-Free'
+                        : voiceState === 'listening'
+                        ? 'Listening to Microphone...'
+                        : voiceState === 'processing'
+                        ? 'Executing Objective...'
+                        : voiceState === 'speaking'
+                        ? 'Speaking Response...'
+                        : voiceState === 'interrupted'
+                        ? 'Interrupted'
+                        : voiceState === 'error'
+                        ? 'Voice Fallback Active'
+                        : isWakeWordListening
+                        ? 'Listening for "Hey Alina"...'
+                        : 'ALINA Ready'
+                    }
+                  />
+                  {isConversationActive && (
+                    <span className="flex items-center space-x-1 text-[10px] font-mono font-medium px-2 py-0.5 rounded-full bg-amber-500/10 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                      <span>CONVERSATION ACTIVE</span>
+                    </span>
+                  )}
+                  {voiceMode === 'wake_mode' && isWakeWordListening && !isConversationActive && (
+                    <span className="text-[10px] font-mono text-stone-500 dark:text-stone-400 px-1.5 py-0.5 rounded bg-stone-100 dark:bg-stone-800">
+                      WAKE MODE: &quot;Hey Alina&quot;
+                    </span>
+                  )}
+                </div>
                 {transcriptDebugMode && transcriptQuality && (
                   <span className="text-[10px] font-mono text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
                     RAW: {transcriptQuality.rawTranscript.slice(0, 20)}... → NORM: {transcriptQuality.normalizedInput.slice(0, 20)}...
@@ -704,8 +736,11 @@ export default function AlinaHomePage() {
                   'Index local documentation into semantic vector memory',
                 ]}
                 voiceState={voiceState}
+                isConversationActive={isConversationActive}
+                voiceActivityState={voiceActivityState}
                 onStartVoice={startListening}
                 onStopVoice={stopListening}
+                onEndConversation={endConversation}
                 onInterruptVoice={interrupt}
                 interimTranscript={interimTranscript}
                 voiceErrorMessage={voiceErrorMessage}

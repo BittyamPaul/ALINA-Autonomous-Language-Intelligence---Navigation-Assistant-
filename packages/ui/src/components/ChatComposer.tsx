@@ -24,9 +24,12 @@ export interface ChatComposerProps {
   className?: string;
   // Voice interaction props
   voiceState?: 'idle' | 'listening' | 'processing' | 'speaking' | 'interrupted' | 'error';
+  isConversationActive?: boolean;
+  voiceActivityState?: 'idle' | 'listening' | 'user_speaking' | 'silence' | 'end_of_utterance' | 'thinking' | 'speaking' | 'interrupted' | 'error';
   onStartVoice?: () => void;
   onStopVoice?: () => void;
   onInterruptVoice?: () => void;
+  onEndConversation?: () => void;
   interimTranscript?: string;
   voiceErrorMessage?: string;
   onClearVoiceError?: () => void;
@@ -44,9 +47,12 @@ export function ChatComposer({
   ],
   className,
   voiceState = 'idle',
+  isConversationActive = false,
+  voiceActivityState = 'idle',
   onStartVoice,
   onStopVoice,
   onInterruptVoice,
+  onEndConversation,
   interimTranscript,
   voiceErrorMessage,
   onClearVoiceError,
@@ -189,11 +195,15 @@ export function ChatComposer({
             onKeyDown={handleKeyDown}
             aria-label="Objective or task prompt"
             placeholder={
-              voiceState === 'listening'
+              isConversationActive && voiceState === 'listening'
+                ? 'Conversation mode active • Speak naturally, no taps needed...'
+                : isConversationActive && voiceState === 'speaking'
+                ? 'ALINA is speaking response...'
+                : voiceState === 'listening'
                 ? 'Listening to microphone...'
                 : placeholder
             }
-            disabled={disabled || voiceState === 'listening'}
+            disabled={disabled || (voiceState === 'listening' && !isConversationActive)}
             className="w-full resize-none bg-transparent text-sm text-stone-900 dark:text-stone-100 placeholder-stone-400 focus:outline-none leading-relaxed font-sans"
           />
         </div>
@@ -201,8 +211,44 @@ export function ChatComposer({
         {/* Bottom controls */}
         <div className="flex items-center justify-between px-3 pb-2.5 pt-1 border-t border-stone-100 dark:border-stone-800/60">
           <div className="flex items-center space-x-1.5 text-stone-400">
-            {/* Voice Control Button */}
-            {voiceState === 'listening' ? (
+            {/* Voice Control Buttons */}
+            {isConversationActive ? (
+              <div className="flex items-center space-x-1.5">
+                <button
+                  type="button"
+                  onClick={onEndConversation || onStopVoice}
+                  className="flex items-center space-x-1 px-2.5 py-1 rounded-md bg-stone-200 dark:bg-stone-800 hover:bg-rose-100 dark:hover:bg-rose-950/70 text-stone-700 dark:text-stone-300 hover:text-rose-600 dark:hover:text-rose-400 text-xs font-mono transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500/80"
+                  title="End continuous conversation (returns to Wake Mode)"
+                  aria-label="End conversation"
+                >
+                  <Square className="w-3 h-3 fill-current text-rose-500" />
+                  <span>End conversation</span>
+                </button>
+                {voiceState === 'speaking' ? (
+                  <button
+                    type="button"
+                    onClick={onInterruptVoice}
+                    className="p-1.5 rounded-lg hover:bg-stone-100 dark:hover:bg-stone-800 text-emerald-500 hover:text-emerald-600 transition-colors"
+                    title="Interrupt speech playback"
+                  >
+                    <Volume2 className="w-3.5 h-3.5 animate-pulse" />
+                  </button>
+                ) : (
+                  <span className="flex items-center space-x-1 text-[11px] font-mono text-amber-600 dark:text-amber-400 px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                    <span>
+                      {voiceActivityState === 'user_speaking'
+                        ? 'Speaking...'
+                        : voiceActivityState === 'silence'
+                        ? 'Listening...'
+                        : voiceActivityState === 'thinking'
+                        ? 'Thinking...'
+                        : 'Active'}
+                    </span>
+                  </span>
+                )}
+              </div>
+            ) : voiceState === 'listening' ? (
               <button
                 type="button"
                 onClick={onStopVoice}
@@ -229,7 +275,7 @@ export function ChatComposer({
                 type="button"
                 onClick={onStartVoice}
                 className="p-1.5 rounded-lg hover:bg-stone-100 dark:hover:bg-stone-800 hover:text-amber-600 dark:hover:text-amber-400 text-stone-400 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/80"
-                title="Voice objective (Microphone)"
+                title="Start conversation mode"
                 aria-label="Start microphone input"
               >
                 <Mic className="w-4 h-4" />

@@ -1,6 +1,7 @@
 import {
   VoiceTranscript,
   TranscriptQualityTier,
+  VoiceActivityState,
 } from '@alina/shared';
 
 /**
@@ -53,6 +54,7 @@ export const applyPhoneticNormalization = normalizeSpeechTranscript;
  * 
  * Manages reliable, multi-clause speech transcription with:
  * - Silence endpoint detection (prevents premature cutoffs on natural pauses)
+ * - Fine-grained VAD state tracking: user_speaking -> silence -> end_of_utterance
  * - Partial-result accumulation buffer across continuous recognition turns
  * - Phonetic disambiguation for technical terms & Indian English / Hinglish
  * - Multi-tier transcript debug records (RAW, FINAL, NORMALIZED)
@@ -63,14 +65,38 @@ export class EnhancedSpeechRecognitionCoordinator {
   private silenceTimer: any = null;
   private silenceTimeoutMs = 1500;
   private debugMode = false;
+  private currentActivityState: VoiceActivityState = 'idle';
   private lastQualityRecord?: TranscriptQualityTier;
+  private onActivityStateChange?: (state: VoiceActivityState) => void;
 
-  constructor(options?: { silenceTimeoutMs?: number; debugMode?: boolean }) {
+  constructor(options?: {
+    silenceTimeoutMs?: number;
+    debugMode?: boolean;
+    onActivityStateChange?: (state: VoiceActivityState) => void;
+  }) {
     if (options?.silenceTimeoutMs) {
       this.silenceTimeoutMs = options.silenceTimeoutMs;
     }
     if (options?.debugMode) {
       this.debugMode = options.debugMode;
+    }
+    this.onActivityStateChange = options?.onActivityStateChange;
+  }
+
+  public setActivityStateListener(listener: (state: VoiceActivityState) => void): void {
+    this.onActivityStateChange = listener;
+  }
+
+  public getActivityState(): VoiceActivityState {
+    return this.currentActivityState;
+  }
+
+  private setActivityState(state: VoiceActivityState): void {
+    if (this.currentActivityState !== state) {
+      this.currentActivityState = state;
+      if (this.onActivityStateChange) {
+        this.onActivityStateChange(state);
+      }
     }
   }
 
@@ -91,12 +117,13 @@ export class EnhancedSpeechRecognitionCoordinator {
   }
 
   /**
-   * Resets internal accumulation buffers.
+   * Resets internal accumulation buffers and resets activity state to listening/idle.
    */
-  public reset(): void {
+  public reset(nextState: VoiceActivityState = 'listening'): void {
     this.clearSilenceTimer();
     this.rawBuffer = '';
     this.interimBuffer = '';
+    this.setActivityState(nextState);
   }
 
   /**
@@ -109,6 +136,9 @@ export class EnhancedSpeechRecognitionCoordinator {
     onInterimUpdate?: (interimText: string) => void
   ): void {
     this.clearSilenceTimer();
+
+    // User is actively speaking
+    this.setActivityState('user_speaking');
 
     if (event.isFinal) {
       if (event.text.trim()) {
@@ -128,9 +158,11 @@ export class EnhancedSpeechRecognitionCoordinator {
       onInterimUpdate(currentCombined);
     }
 
-    // Schedule silence endpoint timer
+    // Enter short silence state while timer is running
     if (this.rawBuffer.trim()) {
+      this.setActivityState('silence');
       this.silenceTimer = setTimeout(() => {
+        this.setActivityState('end_of_utterance');
         this.finalize(onFinalized);
       }, this.silenceTimeoutMs);
     }
@@ -159,7 +191,7 @@ export class EnhancedSpeechRecognitionCoordinator {
     };
 
     this.lastQualityRecord = record;
-    this.reset();
+    this.reset('idle');
     onFinalized(record);
   }
 
@@ -170,3 +202,4 @@ export class EnhancedSpeechRecognitionCoordinator {
     }
   }
 }
+

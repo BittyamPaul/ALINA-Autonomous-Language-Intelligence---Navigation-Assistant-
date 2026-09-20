@@ -3,6 +3,9 @@ import {
   VoiceTranscript,
   VoiceErrorReason,
   VoiceSessionConfig,
+  VoiceConversationMode,
+  VoiceActivityState,
+  VoiceConversationSession,
 } from '@alina/shared';
 
 /**
@@ -45,6 +48,7 @@ export interface VoiceInteractionResult {
   durationMs: number;
   taskId?: string;
   error?: string;
+  terminatedSession?: boolean;
 }
 
 /**
@@ -52,9 +56,14 @@ export interface VoiceInteractionResult {
  */
 export interface VoiceCoordinatorEvents {
   onStateChange?: (state: VoiceState) => void;
+  onModeChange?: (mode: VoiceConversationMode) => void;
+  onActivityStateChange?: (activityState: VoiceActivityState) => void;
+  onSessionChange?: (session: VoiceConversationSession | null) => void;
+  onInactivityWarning?: (prompt: string) => void;
   onTranscript?: (transcript: VoiceTranscript) => void;
   onTaskDispatched?: (taskId: string, goal: string) => void;
   onSpokenSummary?: (text: string) => void;
   onError?: (reason: VoiceErrorReason, message: string) => void;
   onFallbackToText?: (partialTranscript: string) => void;
 }
+
