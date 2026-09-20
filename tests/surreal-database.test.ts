@@ -292,6 +292,9 @@ describe('ALINA SurrealDB Data Architecture', () => {
         content: 'PathJail must strictly prevent out-of-boundary access.',
         category: 'rule',
         importance: 1.0,
+        confidence: 1.0,
+        epistemicTier: 'EXPLICIT',
+        userEditable: true,
         source: 'user_explicit',
         layer: 'semantic',
         accessCount: 1,
@@ -299,6 +302,7 @@ describe('ALINA SurrealDB Data Architecture', () => {
         tags: ['security', 'pathjail'],
         embedding: vecSecurity,
         lastAccessedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
         createdAt: new Date().toISOString(),
       };
 
@@ -307,6 +311,9 @@ describe('ALINA SurrealDB Data Architecture', () => {
         content: 'Editorial typography uses Newsreader and warm stone light mode.',
         category: 'preference',
         importance: 0.8,
+        confidence: 1.0,
+        epistemicTier: 'EXPLICIT',
+        userEditable: true,
         source: 'user_explicit',
         layer: 'semantic',
         accessCount: 1,
@@ -314,6 +321,7 @@ describe('ALINA SurrealDB Data Architecture', () => {
         tags: ['design'],
         embedding: vecDesign,
         lastAccessedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
         createdAt: new Date().toISOString(),
       };
 
