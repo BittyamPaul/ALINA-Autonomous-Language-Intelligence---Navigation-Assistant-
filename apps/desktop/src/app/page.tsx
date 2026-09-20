@@ -95,11 +95,32 @@ export default function AlinaHomePage() {
 
           if (memRes.success && memRes.data && memRes.data.length > 0) {
             const mapCategory = (cat: string): MemoryCategory => {
-              if (cat === 'project_context') return 'context';
-              if (cat === 'workflow_pattern') return 'workflow';
-              if (cat === 'preference' || cat === 'fact' || cat === 'rule' || cat === 'context' || cat === 'workflow') {
-                return cat;
+              if (
+                cat === 'PERSONAL_PREFERENCE' ||
+                cat === 'UI_PREFERENCE' ||
+                cat === 'TOOL_PREFERENCE' ||
+                cat === 'preference'
+              ) {
+                return 'preference';
               }
+              if (
+                cat === 'RECURRING_WORKFLOW' ||
+                cat === 'TASK_PATTERN' ||
+                cat === 'workflow_pattern'
+              ) {
+                return 'workflow';
+              }
+              if (
+                cat === 'PROJECT_CONTEXT' ||
+                cat === 'WORK_STYLE' ||
+                cat === 'COMMUNICATION_STYLE' ||
+                cat === 'TEMPORARY_CONTEXT' ||
+                cat === 'project_context' ||
+                cat === 'context'
+              ) {
+                return 'context';
+              }
+              if (cat === 'rule') return 'rule';
               return 'fact';
             };
 

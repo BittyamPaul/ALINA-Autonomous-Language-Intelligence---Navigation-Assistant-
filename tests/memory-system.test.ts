@@ -67,7 +67,7 @@ describe('ALINA Memory Architecture: 3-Tier Conceptual System & SurrealDB Integr
     it('correctly classifies user preferences into semantic layer with high importance', () => {
       const evalPref = MemoryExtractor.evaluate('I prefer strict TypeScript without unnecessary any types.');
       expect(evalPref.shouldRemember).toBe(true);
-      expect(evalPref.category).toBe('preference');
+      expect(['preference', 'PERSONAL_PREFERENCE']).toContain(evalPref.category);
       expect(evalPref.layer).toBe('semantic');
       expect(evalPref.importance).toBeGreaterThanOrEqual(0.9);
       expect(evalPref.tags).toContain('user_preference');
@@ -76,7 +76,7 @@ describe('ALINA Memory Architecture: 3-Tier Conceptual System & SurrealDB Integr
     it('correctly classifies frequent locations and project paths', () => {
       const evalPath = MemoryExtractor.evaluate('My project root is located at C:\\Users\\bitty\\Desktop\\ALINA');
       expect(evalPath.shouldRemember).toBe(true);
-      expect(evalPath.category).toBe('location');
+      expect(['location', 'PROJECT_CONTEXT']).toContain(evalPath.category);
       expect(evalPath.layer).toBe('semantic');
       expect(evalPath.tags).toContain('location');
     });
@@ -87,7 +87,7 @@ describe('ALINA Memory Architecture: 3-Tier Conceptual System & SurrealDB Integr
         { status: 'completed', resultSummary: 'Built 12 static pages cleanly', stepsCompleted: 3 }
       );
       expect(successEval.shouldRemember).toBe(true);
-      expect(successEval.category).toBe('task_outcome');
+      expect(['task_outcome', 'TASK_PATTERN']).toContain(successEval.category);
       expect(successEval.layer).toBe('episodic');
       expect(successEval.tags).toContain('success');
 

@@ -18,6 +18,8 @@ import type {
   ApprovalEntity,
   MemoryEntity,
   MemoryCategory,
+  EpistemicTier,
+  LearningSettings,
   TaskStatus,
   AgentRunEntity,
   ToolCallEntity,
@@ -151,9 +153,13 @@ export class AlinaApiClient {
       }),
   };
 
-  // Memories
+  // Memories & Learning Layer
   public readonly memories = {
-    list: (params?: { category?: MemoryCategory; layer?: string; query?: string } | MemoryCategory) => {
+    list: (
+      params?:
+        | { category?: MemoryCategory; layer?: string; query?: string; tier?: EpistemicTier }
+        | MemoryCategory
+    ) => {
       let queryString = '';
       if (typeof params === 'string') {
         queryString = `?category=${encodeURIComponent(params)}`;
@@ -162,10 +168,13 @@ export class AlinaApiClient {
         if (params.category) q.set('category', params.category);
         if (params.layer) q.set('layer', params.layer);
         if (params.query) q.set('q', params.query);
+        if (params.tier) q.set('tier', params.tier);
         queryString = q.toString() ? `?${q.toString()}` : '';
       }
       return this.request<MemoryEntity[]>(`/api/memories${queryString}`);
     },
+    retrieve: (id: string) =>
+      this.request<MemoryEntity>(`/api/memories/${encodeURIComponent(id)}`),
     create: (input: CreateMemoryInput) =>
       this.request<MemoryEntity>('/api/memories', {
         method: 'POST',
@@ -176,6 +185,16 @@ export class AlinaApiClient {
         method: 'PUT',
         body: JSON.stringify(updates),
       }),
+    reinforce: (id: string, boost = 0.1) =>
+      this.request<MemoryEntity>(`/api/memories/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ action: 'reinforce', boost }),
+      }),
+    decay: (options?: { decayFactor?: number; minConfidence?: number; purgeExpired?: boolean }) =>
+      this.request<{ decayedCount: number; purgedCount: number }>('/api/memories', {
+        method: 'POST',
+        body: JSON.stringify({ action: 'decay', options }),
+      }),
     search: (input: SearchMemoryInput) =>
       this.request<Array<{ memory: MemoryEntity; score: number }>>('/api/memories', {
         method: 'POST',
@@ -184,6 +203,13 @@ export class AlinaApiClient {
     delete: (id: string) =>
       this.request<{ deleted: boolean; id: string }>(`/api/memories/${encodeURIComponent(id)}`, {
         method: 'DELETE',
+      }),
+    getSettings: () =>
+      this.request<LearningSettings>('/api/memories/settings'),
+    updateSettings: (settings: Partial<LearningSettings>) =>
+      this.request<LearningSettings>('/api/memories/settings', {
+        method: 'PUT',
+        body: JSON.stringify(settings),
       }),
   };
 

@@ -12,6 +12,7 @@ export * from './supervisor-agent';
 export * from './browser-agent';
 export * from './memory/text-embedder';
 export * from './memory/memory-extractor';
+export * from './memory/privacy-sanitizer';
 export * from './security/authorization-manager';
 export * from './multiagent/base-specialized-agent';
 export * from './multiagent/filesystem-agent';

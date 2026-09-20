@@ -129,12 +129,18 @@ DEFINE FIELD created_at ON TABLE approval TYPE datetime DEFAULT time::now();
 -- Memory (Semantic Vector Storage)
 DEFINE TABLE memory SCHEMAFULL;
 DEFINE FIELD content ON TABLE memory TYPE string;
-DEFINE FIELD category ON TABLE memory TYPE string ASSERT $value IN ['preference', 'fact', 'project_context', 'workflow_pattern', 'rule'] DEFAULT 'fact';
+DEFINE FIELD category ON TABLE memory TYPE string ASSERT $value IN ['PERSONAL_PREFERENCE', 'WORK_STYLE', 'COMMUNICATION_STYLE', 'PROJECT_CONTEXT', 'RECURRING_WORKFLOW', 'TOOL_PREFERENCE', 'UI_PREFERENCE', 'TASK_PATTERN', 'EXPLICIT_FACT', 'TEMPORARY_CONTEXT', 'preference', 'fact', 'project_context', 'workflow_pattern', 'rule', 'location', 'recurring_task', 'task_outcome'] DEFAULT 'EXPLICIT_FACT';
 DEFINE FIELD importance ON TABLE memory TYPE float DEFAULT 0.5;
+DEFINE FIELD confidence ON TABLE memory TYPE float DEFAULT 1.0;
+DEFINE FIELD epistemic_tier ON TABLE memory TYPE option<string> ASSERT $value == NONE OR $value IN ['EXPLICIT', 'OBSERVED', 'INFERRED'] DEFAULT 'EXPLICIT';
+DEFINE FIELD source ON TABLE memory TYPE string DEFAULT 'user_explicit';
+DEFINE FIELD user_editable ON TABLE memory TYPE bool DEFAULT true;
 DEFINE FIELD tags ON TABLE memory TYPE array<string> DEFAULT [];
 DEFINE FIELD embedding ON TABLE memory TYPE option<array<float, 384>>;
 DEFINE FIELD workspace_id ON TABLE memory TYPE option<record<workspace>>;
 DEFINE FIELD last_accessed_at ON TABLE memory TYPE datetime DEFAULT time::now();
+DEFINE FIELD last_used_at ON TABLE memory TYPE option<datetime>;
+DEFINE FIELD updated_at ON TABLE memory TYPE datetime DEFAULT time::now();
 DEFINE FIELD created_at ON TABLE memory TYPE datetime DEFAULT time::now();
 
 -- Vector Index (Cosine Distance, 384 dimensions)

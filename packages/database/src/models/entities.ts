@@ -221,7 +221,33 @@ export const ApprovalSchema = z.object({
 export type ApprovalEntity = z.infer<typeof ApprovalSchema>;
 
 // 12. Memory Entity
+export const ConceptualMemoryCategorySchema = z.enum([
+  'PERSONAL_PREFERENCE',
+  'WORK_STYLE',
+  'COMMUNICATION_STYLE',
+  'PROJECT_CONTEXT',
+  'RECURRING_WORKFLOW',
+  'TOOL_PREFERENCE',
+  'UI_PREFERENCE',
+  'TASK_PATTERN',
+  'EXPLICIT_FACT',
+  'TEMPORARY_CONTEXT',
+]);
+export type ConceptualMemoryCategory = z.infer<typeof ConceptualMemoryCategorySchema>;
+
 export const MemoryCategorySchema = z.enum([
+  // 10 Conceptual Categories
+  'PERSONAL_PREFERENCE',
+  'WORK_STYLE',
+  'COMMUNICATION_STYLE',
+  'PROJECT_CONTEXT',
+  'RECURRING_WORKFLOW',
+  'TOOL_PREFERENCE',
+  'UI_PREFERENCE',
+  'TASK_PATTERN',
+  'EXPLICIT_FACT',
+  'TEMPORARY_CONTEXT',
+  // Legacy Categories
   'preference',
   'project_info',
   'location',
@@ -238,27 +264,50 @@ export type MemoryCategory = z.infer<typeof MemoryCategorySchema>;
 export const MemoryLayerSchema = z.enum(['conversation', 'episodic', 'semantic']);
 export type MemoryLayer = z.infer<typeof MemoryLayerSchema>;
 
-export const MemorySourceSchema = z.enum(['user_explicit', 'agent_reflection', 'task_outcome', 'dialogue']);
+export const EpistemicTierSchema = z.enum(['EXPLICIT', 'OBSERVED', 'INFERRED']);
+export type EpistemicTier = z.infer<typeof EpistemicTierSchema>;
+
+export const MemorySourceSchema = z.union([
+  z.enum(['user_explicit', 'agent_reflection', 'task_outcome', 'dialogue']),
+  z.string(),
+]);
 export type MemorySource = z.infer<typeof MemorySourceSchema>;
 
 export const MemorySchema = z.object({
   id: z.string(),
   content: z.string().min(1),
-  category: MemoryCategorySchema.default('fact'),
+  category: MemoryCategorySchema.default('EXPLICIT_FACT'),
   layer: MemoryLayerSchema.default('semantic'),
   importance: z.number().min(0).max(1).default(0.5),
+  confidence: z.number().min(0).max(1).default(1.0),
+  epistemicTier: EpistemicTierSchema.default('EXPLICIT'),
+  source: z.string().default('user_explicit'),
+  userEditable: z.boolean().default(true),
+  user_editable: z.boolean().optional(),
   tags: z.array(z.string()).default([]),
   embedding: z.array(z.number()).length(384).optional(),
   workspaceId: z.string().optional(),
   expiresAt: z.string().datetime().nullable().optional(),
+  expiration: z.string().datetime().nullable().optional(),
   supersededBy: z.string().optional(),
-  source: MemorySourceSchema.default('user_explicit'),
   accessCount: z.number().int().nonnegative().default(0),
   metadata: NoSecretsSchema.default({}),
   lastAccessedAt: z.string().datetime().default(() => new Date().toISOString()),
+  last_used_at: z.string().datetime().optional(),
+  updatedAt: z.string().datetime().default(() => new Date().toISOString()),
+  updated_at: z.string().datetime().optional(),
   createdAt: z.string().datetime().default(() => new Date().toISOString()),
+  created_at: z.string().datetime().optional(),
 });
 export type MemoryEntity = z.infer<typeof MemorySchema>;
+
+export const LearningSettingsSchema = z.object({
+  learningEnabled: z.boolean().default(true),
+  disabledCategories: z.array(MemoryCategorySchema).default([]),
+  inferentialLearningEnabled: z.boolean().default(true),
+  updatedAt: z.string().datetime().default(() => new Date().toISOString()),
+});
+export type LearningSettings = z.infer<typeof LearningSettingsSchema>;
 
 // 13. File Reference Entity
 export const FileReferenceCategorySchema = z.enum([

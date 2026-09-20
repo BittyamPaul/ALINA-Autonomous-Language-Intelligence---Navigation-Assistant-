@@ -5,9 +5,13 @@ import {
   MemoryCategorySchema,
   MemoryLayerSchema,
   MemorySourceSchema,
+  EpistemicTierSchema,
+  LearningSettingsSchema,
   type MemoryEntity,
   type MemoryCategory,
   type MemoryLayer,
+  type EpistemicTier,
+  type LearningSettings,
   type MemorySearchResult,
 } from '@alina/database';
 import { AlinaServiceError } from './base-service';
@@ -19,11 +23,16 @@ export const CreateMemoryInputSchema = z.object({
   category: MemoryCategorySchema.optional(),
   layer: MemoryLayerSchema.optional(),
   importance: z.number().min(0).max(1).optional(),
+  confidence: z.number().min(0).max(1).optional(),
+  epistemicTier: EpistemicTierSchema.optional(),
   tags: z.array(z.string()).optional(),
   embedding: z.array(z.number()).length(384).optional(),
   workspaceId: z.string().optional(),
   expiresAt: z.string().datetime().nullable().optional(),
+  expiration: z.string().datetime().nullable().optional(),
   source: MemorySourceSchema.optional(),
+  userEditable: z.boolean().optional(),
+  user_editable: z.boolean().optional(),
   metadata: z.record(z.unknown()).optional(),
 });
 export type CreateMemoryInput = z.input<typeof CreateMemoryInputSchema>;
@@ -33,8 +42,13 @@ export const UpdateMemoryInputSchema = z.object({
   category: MemoryCategorySchema.optional(),
   layer: MemoryLayerSchema.optional(),
   importance: z.number().min(0).max(1).optional(),
+  confidence: z.number().min(0).max(1).optional(),
+  epistemicTier: EpistemicTierSchema.optional(),
   tags: z.array(z.string()).optional(),
   expiresAt: z.string().datetime().nullable().optional(),
+  expiration: z.string().datetime().nullable().optional(),
+  userEditable: z.boolean().optional(),
+  user_editable: z.boolean().optional(),
   metadata: z.record(z.unknown()).optional(),
 });
 export type UpdateMemoryInput = z.input<typeof UpdateMemoryInputSchema>;
@@ -44,11 +58,12 @@ export const SearchMemoryInputSchema = z.object({
   queryEmbedding: z.array(z.number()).length(384).optional(),
   layer: MemoryLayerSchema.optional(),
   category: MemoryCategorySchema.optional(),
+  epistemicTier: EpistemicTierSchema.optional(),
   limit: z.number().int().positive().default(5),
   minScore: z.number().min(0).max(1).default(0.3),
   workspaceId: z.string().optional(),
 });
-export type SearchMemoryInput = z.infer<typeof SearchMemoryInputSchema>;
+export type SearchMemoryInput = z.input<typeof SearchMemoryInputSchema>;
 
 export interface RecallResult {
   memory: MemoryEntity;
@@ -59,6 +74,7 @@ export interface RecallResult {
 export interface RecallOptions {
   layer?: MemoryLayer;
   category?: MemoryCategory;
+  epistemicTier?: EpistemicTier;
   limit?: number;
   minScore?: number;
   workspaceId?: string;
@@ -76,18 +92,58 @@ export class MemoryService {
   }
 
   /**
-   * Evaluates and stores a meaningful memory in SurrealDB.
-   * Disallows secrets, transient chatter, and ephemeral noise.
+   * Retrieves current learning configuration (global enable/disable & category controls).
+   */
+  public async getSettings(): Promise<LearningSettings> {
+    return this.memoryRepo.getLearningSettings();
+  }
+
+  /**
+   * Updates learning configuration.
+   */
+  public async updateSettings(updates: Partial<LearningSettings>): Promise<LearningSettings> {
+    const validated = LearningSettingsSchema.partial().parse(updates);
+    return this.memoryRepo.updateLearningSettings(validated);
+  }
+
+  /**
+   * Evaluates, sanitizes, and stores a memory in SurrealDB.
+   * Enforces privacy guardrails, epistemic provenance, and learning preferences.
    */
   public async remember(input: CreateMemoryInput, userId = 'default_operator'): Promise<MemoryEntity> {
+    const settings = await this.getSettings();
+
+    // 1. Check Global Learning Switch
+    if (!settings.learningEnabled) {
+      throw new AlinaServiceError(
+        'ALINA Personal Learning is currently disabled by user setting.',
+        'LEARNING_DISABLED',
+        403
+      );
+    }
+
     const validated = CreateMemoryInputSchema.parse(input);
 
-    // Evaluate against memory extraction rules
+    // 2. Check Per-Category Learning Opt-Out
+    if (validated.category && settings.disabledCategories.includes(validated.category)) {
+      throw new AlinaServiceError(
+        `Learning for category "${validated.category}" is currently disabled in user preferences.`,
+        'CATEGORY_LEARNING_DISABLED',
+        403
+      );
+    }
+
+    // 3. Evaluate against memory extraction & privacy rules
     const existingList = await this.memoryRepo.list(200);
+    const sourceString = typeof validated.source === 'string' ? validated.source : 'user_explicit';
+
     const evaluation: ExtractionEvaluation = MemoryExtractor.evaluate(
       validated.content,
       existingList,
-      validated.layer
+      validated.layer,
+      validated.category,
+      sourceString,
+      validated.epistemicTier
     );
 
     if (!evaluation.shouldRemember) {
@@ -95,6 +151,24 @@ export class MemoryService {
         `Memory rejected by extraction policy: ${evaluation.reason}`,
         'MEMORY_EXTRACTION_REJECTED',
         400
+      );
+    }
+
+    // 4. Verify category if detected category is disabled
+    if (settings.disabledCategories.includes(evaluation.category)) {
+      throw new AlinaServiceError(
+        `Classified category "${evaluation.category}" is disabled in user preferences.`,
+        'CATEGORY_LEARNING_DISABLED',
+        403
+      );
+    }
+
+    // 5. Check Inferential Learning Toggle
+    if (evaluation.epistemicTier === 'INFERRED' && !settings.inferentialLearningEnabled) {
+      throw new AlinaServiceError(
+        'Inferential learning is disabled by user setting.',
+        'INFERENTIAL_LEARNING_DISABLED',
+        403
       );
     }
 
@@ -112,24 +186,81 @@ export class MemoryService {
       }
     }
 
+    const now = new Date().toISOString();
+    const effectiveExpiresAt =
+      validated.expiresAt !== undefined
+        ? validated.expiresAt
+        : validated.expiration !== undefined
+        ? validated.expiration
+        : evaluation.expiresAt;
+
+    const isUserEditable =
+      validated.userEditable !== undefined
+        ? validated.userEditable
+        : validated.user_editable !== undefined
+        ? validated.user_editable
+        : true;
+
     const entity: MemoryEntity = {
       id,
       content: evaluation.sanitizedContent,
       category: validated.category || evaluation.category,
       layer: validated.layer || evaluation.layer,
       importance: validated.importance ?? evaluation.importance,
+      confidence: validated.confidence ?? evaluation.confidence,
+      epistemicTier: validated.epistemicTier || evaluation.epistemicTier,
+      source: evaluation.source,
+      userEditable: isUserEditable,
+      user_editable: isUserEditable,
       tags: validated.tags && validated.tags.length > 0 ? validated.tags : evaluation.tags,
       embedding,
       workspaceId: validated.workspaceId,
-      expiresAt: validated.expiresAt !== undefined ? validated.expiresAt : evaluation.expiresAt,
-      source: validated.source || 'user_explicit',
+      expiresAt: effectiveExpiresAt,
+      expiration: effectiveExpiresAt,
       accessCount: 0,
       metadata: validated.metadata || {},
-      lastAccessedAt: new Date().toISOString(),
-      createdAt: new Date().toISOString(),
+      lastAccessedAt: now,
+      last_used_at: now,
+      updatedAt: now,
+      updated_at: now,
+      createdAt: now,
+      created_at: now,
     };
 
     return this.memoryRepo.remember(userId, entity);
+  }
+
+  /**
+   * Retrieves a single memory by ID and touches its last_used_at timestamp.
+   */
+  public async retrieve(id: string): Promise<MemoryEntity> {
+    const memory = await this.memoryRepo.retrieve(id);
+    if (!memory) {
+      throw new AlinaServiceError(`Memory with ID "${id}" was not found`, 'MEMORY_NOT_FOUND', 404);
+    }
+    return memory;
+  }
+
+  /**
+   * Reinforces confidence of an existing memory upon repeated observation or user confirmation.
+   */
+  public async reinforce(id: string, boost = 0.1): Promise<MemoryEntity> {
+    const existing = await this.memoryRepo.findById(id);
+    if (!existing) {
+      throw new AlinaServiceError(`Memory with ID "${id}" was not found`, 'MEMORY_NOT_FOUND', 404);
+    }
+    return this.memoryRepo.reinforce(id, boost);
+  }
+
+  /**
+   * Decays unreinforced, inferred, or temporary memories, and purges expired records.
+   */
+  public async decay(options: {
+    decayFactor?: number;
+    minConfidence?: number;
+    purgeExpired?: boolean;
+  } = {}): Promise<{ decayedCount: number; purgedCount: number }> {
+    return this.memoryRepo.decay(options);
   }
 
   /**
@@ -150,12 +281,16 @@ export class MemoryService {
       workspaceId: options.workspaceId,
     });
 
-    // Bump access counts in background
-    for (const res of results) {
+    let filtered = results;
+    if (options.epistemicTier) {
+      filtered = filtered.filter((r) => r.memory.epistemicTier === options.epistemicTier);
+    }
+
+    for (const res of filtered) {
       this.memoryRepo.bumpAccess(res.memory.id).catch(() => {});
     }
 
-    return results.map((r) => ({
+    return filtered.map((r) => ({
       memory: r.memory,
       relevanceScore: r.score,
       similarity: r.similarity,
@@ -171,7 +306,11 @@ export class MemoryService {
 
     if (!embedding) {
       const active = await this.list(validated.layer, validated.category);
-      return active.slice(0, validated.limit).map((m) => ({
+      let list = active;
+      if (validated.epistemicTier) {
+        list = list.filter((m) => m.epistemicTier === validated.epistemicTier);
+      }
+      return list.slice(0, validated.limit).map((m) => ({
         memory: m,
         relevanceScore: m.importance,
         similarity: 1.0,
@@ -186,7 +325,12 @@ export class MemoryService {
       workspaceId: validated.workspaceId,
     });
 
-    return results.map((r) => ({
+    let filtered = results;
+    if (validated.epistemicTier) {
+      filtered = filtered.filter((r) => r.memory.epistemicTier === validated.epistemicTier);
+    }
+
+    return filtered.map((r) => ({
       memory: r.memory,
       relevanceScore: r.score,
       similarity: r.similarity,
@@ -207,9 +351,22 @@ export class MemoryService {
       throw new AlinaServiceError(`Memory with ID "${id}" was not found`, 'MEMORY_NOT_FOUND', 404);
     }
 
+    const now = new Date().toISOString();
     const updatePayload: Partial<MemoryEntity> = {
       ...validated,
+      updatedAt: now,
+      updated_at: now,
+      lastAccessedAt: now,
+      last_used_at: now,
     };
+
+    if (validated.userEditable !== undefined) {
+      updatePayload.userEditable = validated.userEditable;
+      updatePayload.user_editable = validated.userEditable;
+    } else if (validated.user_editable !== undefined) {
+      updatePayload.userEditable = validated.user_editable;
+      updatePayload.user_editable = validated.user_editable;
+    }
 
     if (validated.content && validated.content !== existing.content) {
       const { valid, sanitized, error } = MemoryExtractor.sanitizeAndValidate(validated.content);
@@ -223,6 +380,10 @@ export class MemoryService {
     return this.memoryRepo.updateMemory(id, updatePayload);
   }
 
+  public async update(id: string, updates: UpdateMemoryInput): Promise<MemoryEntity> {
+    return this.update_memory(id, updates);
+  }
+
   /**
    * Deletes a memory and cleans up all related graph edges.
    */
@@ -234,13 +395,16 @@ export class MemoryService {
     return this.memoryRepo.forgetMemory(id);
   }
 
+  public async forget(id: string): Promise<boolean> {
+    return this.forget_memory(id);
+  }
+
   public async delete(id: string): Promise<boolean> {
     return this.forget_memory(id);
   }
 
   /**
    * List active non-expired memories.
-   * Supports layer, category, or both for full backward compatibility.
    */
   public async list(
     layerOrCategory?: MemoryLayer | MemoryCategory,
@@ -266,8 +430,17 @@ export class MemoryService {
     result: { status: string; resultSummary?: string; stepsCompleted: number; error?: string },
     userId = 'default_operator'
   ): Promise<MemoryEntity | null> {
+    const settings = await this.getSettings();
+    if (!settings.learningEnabled) {
+      return null;
+    }
+
     const evaluation = MemoryExtractor.fromTaskOutcome(task, result);
     if (!evaluation.shouldRemember) return null;
+
+    if (settings.disabledCategories.includes(evaluation.category)) {
+      return null;
+    }
 
     return this.remember(
       {
@@ -275,9 +448,11 @@ export class MemoryService {
         category: evaluation.category,
         layer: evaluation.layer,
         importance: evaluation.importance,
+        confidence: evaluation.confidence,
+        epistemicTier: evaluation.epistemicTier,
         tags: evaluation.tags,
         expiresAt: evaluation.expiresAt,
-        source: 'task_outcome',
+        source: evaluation.source,
         metadata: { taskId: task.id },
       },
       userId

@@ -4,6 +4,8 @@ import {
   MemorySchema,
   MemoryCategory,
   MemoryLayer,
+  LearningSettings,
+  LearningSettingsSchema,
 } from '../models/entities';
 import { AlinaDatabaseClient } from '../client';
 
@@ -252,5 +254,93 @@ export class MemoryRepository extends BaseRepository<MemoryEntity> {
 
   public async listByCategory(category: MemoryCategory): Promise<MemoryEntity[]> {
     return this.listActive(undefined, category);
+  }
+
+  private learningSettings: LearningSettings = {
+    learningEnabled: true,
+    disabledCategories: [],
+    inferentialLearningEnabled: true,
+    updatedAt: new Date().toISOString(),
+  };
+
+  public async getLearningSettings(): Promise<LearningSettings> {
+    return this.learningSettings;
+  }
+
+  public async updateLearningSettings(updates: Partial<LearningSettings>): Promise<LearningSettings> {
+    this.learningSettings = LearningSettingsSchema.parse({
+      ...this.learningSettings,
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    });
+    return this.learningSettings;
+  }
+
+  public async retrieve(id: string): Promise<MemoryEntity | null> {
+    const mem = await this.findById(id);
+    if (!mem) return null;
+    const now = new Date().toISOString();
+    return this.updateMemory(id, {
+      accessCount: (mem.accessCount ?? 0) + 1,
+      lastAccessedAt: now,
+      last_used_at: now,
+    });
+  }
+
+  public async reinforce(id: string, boost = 0.1): Promise<MemoryEntity> {
+    const mem = await this.findById(id);
+    if (!mem) {
+      throw new Error(`Memory with ID "${id}" not found`);
+    }
+    const currentConfidence = mem.confidence ?? 1.0;
+    const newConfidence = Math.min(1.0, Math.max(0.0, Number((currentConfidence + boost).toFixed(2))));
+    const now = new Date().toISOString();
+    return this.updateMemory(id, {
+      confidence: newConfidence,
+      lastAccessedAt: now,
+      last_used_at: now,
+      updatedAt: now,
+      updated_at: now,
+    });
+  }
+
+  public async decay(options: {
+    decayFactor?: number;
+    minConfidence?: number;
+    purgeExpired?: boolean;
+  } = {}): Promise<{ decayedCount: number; purgedCount: number }> {
+    const decayFactor = options.decayFactor ?? 0.05;
+    const minConfidence = options.minConfidence ?? 0.2;
+    const purgeExpired = options.purgeExpired ?? true;
+
+    const all = await this.list(1000);
+    let decayedCount = 0;
+    let purgedCount = 0;
+
+    for (const mem of all) {
+      if (purgeExpired && this.isExpired(mem)) {
+        await this.forgetMemory(mem.id);
+        purgedCount++;
+        continue;
+      }
+
+      if (
+        mem.epistemicTier === 'INFERRED' ||
+        mem.category === 'TEMPORARY_CONTEXT' ||
+        mem.layer === 'conversation'
+      ) {
+        const current = mem.confidence ?? 1.0;
+        const next = Math.max(0.0, Number((current - decayFactor).toFixed(2)));
+        if (next < minConfidence) {
+          await this.forgetMemory(mem.id);
+          purgedCount++;
+        } else if (next !== current) {
+          await this.updateMemory(mem.id, { confidence: next });
+          decayedCount++;
+        }
+      }
+    }
+
+    return { decayedCount, purgedCount };
   }
 }

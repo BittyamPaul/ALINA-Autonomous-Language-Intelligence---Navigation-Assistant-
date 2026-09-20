@@ -125,7 +125,47 @@ export const MessageSchema = z.object({
 });
 export type Message = z.infer<typeof MessageSchema>;
 
+export const ConceptualMemoryCategorySchema = z.enum([
+  'PERSONAL_PREFERENCE',
+  'WORK_STYLE',
+  'COMMUNICATION_STYLE',
+  'PROJECT_CONTEXT',
+  'RECURRING_WORKFLOW',
+  'TOOL_PREFERENCE',
+  'UI_PREFERENCE',
+  'TASK_PATTERN',
+  'EXPLICIT_FACT',
+  'TEMPORARY_CONTEXT',
+]);
+export type ConceptualMemoryCategory = z.infer<typeof ConceptualMemoryCategorySchema>;
+
+export const LegacyMemoryCategorySchema = z.enum([
+  'preference',
+  'project_info',
+  'location',
+  'recurring_task',
+  'task_outcome',
+  'relationship',
+  'fact',
+  'rule',
+  'workflow_pattern',
+  'project_context',
+]);
+export type LegacyMemoryCategory = z.infer<typeof LegacyMemoryCategorySchema>;
+
 export const MemoryCategorySchema = z.enum([
+  // 10 Conceptual Categories
+  'PERSONAL_PREFERENCE',
+  'WORK_STYLE',
+  'COMMUNICATION_STYLE',
+  'PROJECT_CONTEXT',
+  'RECURRING_WORKFLOW',
+  'TOOL_PREFERENCE',
+  'UI_PREFERENCE',
+  'TASK_PATTERN',
+  'EXPLICIT_FACT',
+  'TEMPORARY_CONTEXT',
+  // Legacy Categories (for backwards compatibility)
   'preference',
   'project_info',
   'location',
@@ -139,6 +179,9 @@ export const MemoryCategorySchema = z.enum([
 ]);
 export type MemoryCategory = z.infer<typeof MemoryCategorySchema>;
 
+export const EpistemicTierSchema = z.enum(['EXPLICIT', 'OBSERVED', 'INFERRED']);
+export type EpistemicTier = z.infer<typeof EpistemicTierSchema>;
+
 export const MemoryLayerSchema = z.enum(['conversation', 'episodic', 'semantic']);
 export type MemoryLayer = z.infer<typeof MemoryLayerSchema>;
 
@@ -147,18 +190,36 @@ export const MemoryRecordSchema = z.object({
   content: z.string(),
   category: MemoryCategorySchema,
   layer: MemoryLayerSchema.default('semantic'),
+  source: z.string().default('explicit_user'),
+  confidence: z.number().min(0).max(1).default(1.0),
   importance: z.number().min(0).max(1).default(0.5),
+  epistemicTier: EpistemicTierSchema.default('EXPLICIT'),
+  userEditable: z.boolean().default(true),
+  user_editable: z.boolean().optional(),
   tags: z.array(z.string()).default([]),
   embedding: z.array(z.number()).optional(),
   projectId: z.string().optional(),
   sourceSessionId: z.string().optional(),
   expiresAt: z.string().datetime().nullable().optional(),
+  expiration: z.string().datetime().nullable().optional(),
   supersededBy: z.string().optional(),
   accessCount: z.number().int().nonnegative().default(0),
-  lastAccessedAt: z.string().datetime(),
-  createdAt: z.string().datetime(),
+  lastAccessedAt: z.string().datetime().default(() => new Date().toISOString()),
+  last_used_at: z.string().datetime().optional(),
+  updatedAt: z.string().datetime().default(() => new Date().toISOString()),
+  updated_at: z.string().datetime().optional(),
+  createdAt: z.string().datetime().default(() => new Date().toISOString()),
+  created_at: z.string().datetime().optional(),
 });
 export type MemoryRecord = z.infer<typeof MemoryRecordSchema>;
+
+export const LearningSettingsSchema = z.object({
+  learningEnabled: z.boolean().default(true),
+  disabledCategories: z.array(MemoryCategorySchema).default([]),
+  inferentialLearningEnabled: z.boolean().default(true),
+  updatedAt: z.string().datetime().default(() => new Date().toISOString()),
+});
+export type LearningSettings = z.infer<typeof LearningSettingsSchema>;
 
 export const ProjectSchema = z.object({
   id: z.string(),
