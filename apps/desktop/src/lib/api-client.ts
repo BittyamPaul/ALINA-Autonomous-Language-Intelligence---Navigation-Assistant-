@@ -8,6 +8,7 @@ import type {
   ResolveApprovalInput,
   CreateMemoryInput,
   SearchMemoryInput,
+  SupervisorExecutionResult,
 } from '@alina/agent';
 import type {
   ConversationEntity,
@@ -115,6 +116,20 @@ export class AlinaApiClient {
       this.request<TaskEntity>(`/api/tasks/${encodeURIComponent(id)}`, {
         method: 'PATCH',
         body: JSON.stringify(input),
+      }),
+    execute: (
+      id: string,
+      options?: {
+        goal?: string;
+        workspaceId?: string;
+        isApprovalGranted?: boolean;
+        grantToken?: string;
+        jailRoot?: string;
+      }
+    ) =>
+      this.request<SupervisorExecutionResult>(`/api/tasks/${encodeURIComponent(id)}/execute`, {
+        method: 'POST',
+        body: JSON.stringify(options || {}),
       }),
   };
 

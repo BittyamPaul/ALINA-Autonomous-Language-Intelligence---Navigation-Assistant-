@@ -5,6 +5,7 @@ import {
   Settings,
   ShieldCheck,
   Cpu,
+  Menu,
 } from 'lucide-react';
 import { cn } from '../utils';
 
@@ -15,6 +16,7 @@ export interface TopBarProps {
   onOpenCommandPalette: () => void;
   onOpenSettings: () => void;
   pendingApprovalsCount?: number;
+  onToggleMobileMenu?: () => void;
   className?: string;
 }
 
@@ -25,20 +27,31 @@ export function TopBar({
   onOpenCommandPalette,
   onOpenSettings,
   pendingApprovalsCount = 0,
+  onToggleMobileMenu,
   className,
 }: TopBarProps) {
   return (
     <header
       data-tauri-drag-region
       className={cn(
-        'h-12 border-b px-4 flex items-center justify-between select-none z-20',
+        'h-12 border-b px-3 sm:px-4 flex items-center justify-between select-none z-20 shrink-0',
         'bg-white/80 dark:bg-stone-900/80 border-stone-200/80 dark:border-stone-800/80 backdrop-blur-md',
         className
       )}
     >
-      {/* Left: Breadcrumb / Location */}
-      <div className="flex items-center space-x-2 text-xs font-sans text-stone-500 dark:text-stone-400">
-        <span className="font-semibold text-stone-900 dark:text-stone-100">ALINA</span>
+      {/* Left: Mobile Menu Toggle + Breadcrumb / Location */}
+      <div className="flex items-center space-x-2 text-xs font-sans text-stone-500 dark:text-stone-400 truncate">
+        {onToggleMobileMenu && (
+          <button
+            type="button"
+            onClick={onToggleMobileMenu}
+            className="md:hidden p-2 -ml-1 rounded-lg text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors focus:outline-none focus:ring-2 focus:ring-amber-500 min-h-[36px] min-w-[36px] flex items-center justify-center"
+            aria-label="Toggle navigation menu"
+          >
+            <Menu className="w-4 h-4" />
+          </button>
+        )}
+        <span className="font-semibold text-stone-900 dark:text-stone-100 shrink-0">ALINA</span>
         {breadcrumbs.map((crumb, i) => (
           <div key={crumb} className="flex items-center space-x-2">
             <span className="text-stone-300 dark:text-stone-700">/</span>

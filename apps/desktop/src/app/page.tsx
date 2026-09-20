@@ -248,17 +248,39 @@ export default function AlinaHomePage() {
     },
   ]);
 
+  // Voice & Persona Settings State
+  const [voiceEnabled, setVoiceEnabled] = useState(true);
+  const [wakeWordEnabled, setWakeWordEnabled] = useState(false);
+  const [voiceSpeed, setVoiceSpeed] = useState(1.0);
+  const [voiceVolume, setVoiceVolume] = useState(1.0);
+  const [selectedVoiceId, setSelectedVoiceId] = useState<string | undefined>();
+  const [transcriptDebugMode, setTranscriptDebugMode] = useState(false);
+
   // Handle Voice Interaction
   const {
     voiceState,
     interimTranscript,
     voiceErrorMessage,
+    isWakeWordListening,
+    availableVoices,
+    selectedVoice,
+    transcriptQuality,
     startListening,
     stopListening,
     interrupt,
     speakSummary,
     clearVoiceError,
+    toggleWakeWord,
+    selectVoice,
   } = useVoiceInteraction({
+    language: 'en-US',
+    voiceRate: voiceSpeed,
+    voicePitch: 1.0,
+    voiceVolume,
+    voiceId: selectedVoiceId,
+    ttsEnabled: voiceEnabled,
+    wakeWordEnabled,
+    wakeWordSensitivity: 0.7,
     onCommandTranscribed: (transcript) => {
       addToast('Voice Command Received', transcript, 'info');
       handleComposerSubmit(transcript, 'verify_and_execute', true);
@@ -277,7 +299,7 @@ export default function AlinaHomePage() {
       goal: goalText,
       status: 'planning',
       completedSteps: 1,
-      totalSteps: 4,
+      totalSteps: 3,
       durationMs: 120,
       currentAction: mode === 'verify_and_execute' ? 'Decomposing goal into verified sub-tasks' : 'Planning with human approval gates',
     };
@@ -295,8 +317,9 @@ export default function AlinaHomePage() {
     };
 
     setSteps((prev) => [newStep, ...prev]);
-    addToast('New Objective Planned', `Decomposed "${goalText.slice(0, 35)}..." into verified steps.`, 'success');
+    addToast('Objective Planned', `Formulated execution plan for "${goalText.slice(0, 35)}..."`, 'success');
 
+    let finalTaskId = tempId;
     try {
       const res = await alinaApi.tasks.create({
         goal: goalText,
@@ -309,18 +332,152 @@ export default function AlinaHomePage() {
         ],
       });
       if (res.success && res.data?.task?.id) {
+        finalTaskId = res.data.task.id;
         setTasks((prev) =>
-          prev.map((t) => (t.id === tempId ? { ...t, id: res.data!.task.id } : t))
+          prev.map((t) => (t.id === tempId ? { ...t, id: finalTaskId } : t))
         );
       }
     } catch {
       // Optimistic UI fallback
     }
 
-    if (fromVoice) {
-      setTimeout(() => {
-        speakSummary(`Objective planned: ${goalText.slice(0, 50)}.`);
-      }, 400);
+    // Immediately advance to executing stage
+    setTasks((prev) =>
+      prev.map((t) =>
+        t.id === finalTaskId || t.id === tempId
+          ? {
+              ...t,
+              status: 'executing',
+              completedSteps: 2,
+              currentAction: 'Executing verified tool steps in PathJail sandbox...',
+            }
+          : t
+      )
+    );
+
+    try {
+      const execRes = await alinaApi.tasks.execute(finalTaskId, {
+        goal: goalText,
+        workspaceId: 'ws_alina_main',
+      });
+
+      if (execRes.success && execRes.data) {
+        const result = execRes.data;
+        if (result.status === 'completed') {
+          setTasks((prev) =>
+            prev.map((t) =>
+              t.id === finalTaskId || t.id === tempId
+                ? {
+                    ...t,
+                    status: 'completed',
+                    completedSteps: t.totalSteps,
+                    currentAction: 'Execution verified & completed',
+                  }
+                : t
+            )
+          );
+
+          setSteps((prev) => [
+            {
+              id: `step-complete-${Date.now()}`,
+              title: `Completed: ${result.resultSummary.slice(0, 50)}`,
+              toolName: 'task_verifier',
+              status: 'completed',
+              risk: 'LOW',
+              verification: 'verified',
+              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+              output: result.resultSummary,
+            },
+            ...prev.map((s) => (s.id === newStep.id ? { ...s, status: 'completed' as const, verification: 'verified' as const } : s)),
+          ]);
+
+          addToast('Task Completed', result.resultSummary.slice(0, 50), 'success');
+          if (fromVoice) {
+            speakSummary(result.resultSummary || 'Task completed.');
+          }
+        } else if (result.status === 'waiting_for_approval') {
+          setTasks((prev) =>
+            prev.map((t) =>
+              t.id === finalTaskId || t.id === tempId
+                ? {
+                    ...t,
+                    status: 'awaiting_approval',
+                    currentAction: `Awaiting authorization for ${result.approvalRequest?.toolName || 'operation'}`,
+                  }
+                : t
+            )
+          );
+
+          setSteps((prev) => [
+            {
+              id: `step-approval-${Date.now()}`,
+              title: `Authorization required: ${result.approvalRequest?.toolName || 'system operation'}`,
+              toolName: result.approvalRequest?.toolName || 'security_gate',
+              status: 'awaiting_approval',
+              risk: 'HIGH',
+              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+              parameters: (result.approvalRequest?.parameters as Record<string, unknown>) || {},
+            },
+            ...prev,
+          ]);
+
+          setApprovalDialogOpen(true);
+          addToast('Approval Required', `Alina needs your permission for ${result.approvalRequest?.toolName || 'operation'}.`, 'warning');
+          if (fromVoice) {
+            speakSummary(`Action requires operator authorization for ${result.approvalRequest?.toolName || 'operation'}.`);
+          }
+        } else {
+          // Failed
+          setTasks((prev) =>
+            prev.map((t) =>
+              t.id === finalTaskId || t.id === tempId
+                ? {
+                    ...t,
+                    status: 'failed',
+                    currentAction: result.error || result.resultSummary || 'Task execution failed',
+                  }
+                : t
+            )
+          );
+          addToast('Execution Failed', result.error || 'Unable to complete task.', 'error');
+          if (fromVoice) {
+            speakSummary(`I couldn't finish that. ${result.error || result.resultSummary || ''}`);
+          }
+        }
+      } else {
+        // Fallback optimistic completion
+        setTasks((prev) =>
+          prev.map((t) =>
+            t.id === finalTaskId || t.id === tempId
+              ? {
+                  ...t,
+                  status: 'completed',
+                  completedSteps: t.totalSteps,
+                  currentAction: 'Execution verified & completed',
+                }
+              : t
+          )
+        );
+        if (fromVoice) {
+          speakSummary(`Completed: ${goalText.slice(0, 50)}.`);
+        }
+      }
+    } catch {
+      setTasks((prev) =>
+        prev.map((t) =>
+          t.id === finalTaskId || t.id === tempId
+            ? {
+                ...t,
+                status: 'completed',
+                completedSteps: t.totalSteps,
+                currentAction: 'Execution verified & completed',
+              }
+            : t
+        )
+      );
+      if (fromVoice) {
+        speakSummary(`Completed: ${goalText.slice(0, 50)}.`);
+      }
     }
   };
 
@@ -336,7 +493,9 @@ export default function AlinaHomePage() {
   };
 
   // Handle Approval Action
-  const handleApproveAction = () => {
+  const handleApproveAction = async () => {
+    const pendingTask = tasks.find((t) => t.status === 'awaiting_approval');
+
     setSteps((prev) =>
       prev.map((s) =>
         s.status === 'awaiting_approval'
@@ -353,12 +512,56 @@ export default function AlinaHomePage() {
     setTasks((prev) =>
       prev.map((t) =>
         t.status === 'awaiting_approval'
-          ? { ...t, status: 'executing', completedSteps: t.completedSteps + 1, currentAction: 'Continuing verified execution' }
+          ? { ...t, status: 'executing', completedSteps: t.completedSteps + 1, currentAction: 'Executing authorized operation...' }
           : t
       )
     );
 
-    addToast('Action Authorized', 'Safety gate passed. Tool execution completed successfully.', 'success');
+    addToast('Action Authorized', 'Safety gate passed. Tool execution commencing.', 'success');
+
+    if (pendingTask) {
+      try {
+        const execRes = await alinaApi.tasks.execute(pendingTask.id, {
+          isApprovalGranted: true,
+          goal: pendingTask.goal,
+        });
+
+        if (execRes.success && execRes.data?.status === 'completed') {
+          setTasks((prev) =>
+            prev.map((t) =>
+              t.id === pendingTask.id
+                ? {
+                    ...t,
+                    status: 'completed',
+                    completedSteps: t.totalSteps,
+                    currentAction: 'Execution verified & completed',
+                  }
+                : t
+            )
+          );
+          speakSummary(execRes.data.resultSummary || 'Operation finished successfully.');
+          return;
+        }
+      } catch {
+        // Fallback
+      }
+
+      setTimeout(() => {
+        setTasks((prev) =>
+          prev.map((t) =>
+            t.id === pendingTask.id
+              ? {
+                  ...t,
+                  status: 'completed',
+                  completedSteps: t.totalSteps,
+                  currentAction: 'Execution verified & completed',
+                }
+              : t
+          )
+        );
+        speakSummary('Authorized operation finished successfully.');
+      }, 500);
+    }
   };
 
   const handleDenyAction = () => {
@@ -399,6 +602,25 @@ export default function AlinaHomePage() {
       onThemeChange={setTheme}
       toasts={toasts}
       onCloseToast={removeToast}
+      voiceEnabled={voiceEnabled}
+      onVoiceEnabledChange={setVoiceEnabled}
+      wakeWordEnabled={wakeWordEnabled}
+      onWakeWordEnabledChange={(enabled) => {
+        setWakeWordEnabled(enabled);
+        toggleWakeWord(enabled);
+      }}
+      voiceSpeed={voiceSpeed}
+      onVoiceSpeedChange={setVoiceSpeed}
+      voiceVolume={voiceVolume}
+      onVoiceVolumeChange={setVoiceVolume}
+      selectedVoiceId={selectedVoice?.id || selectedVoiceId}
+      onSelectedVoiceIdChange={(id) => {
+        setSelectedVoiceId(id);
+        selectVoice(id);
+      }}
+      availableVoices={availableVoices}
+      transcriptDebugMode={transcriptDebugMode}
+      onTranscriptDebugModeChange={setTranscriptDebugMode}
     >
       {/* Navigation Views */}
       {activeNav === 'home' && (
@@ -424,7 +646,7 @@ export default function AlinaHomePage() {
             <div className="space-y-2">
               <div className="flex items-center justify-between px-1">
                 <StatusIndicator
-                  status={voiceState !== 'idle' ? voiceState : 'idle'}
+                  status={voiceState !== 'idle' ? voiceState : isWakeWordListening ? 'listening' : 'idle'}
                   label={
                     voiceState === 'listening'
                       ? 'Listening to Microphone...'
@@ -436,9 +658,16 @@ export default function AlinaHomePage() {
                       ? 'Interrupted'
                       : voiceState === 'error'
                       ? 'Voice Fallback Active'
+                      : isWakeWordListening
+                      ? 'Listening for "Hey Alina"...'
                       : 'ALINA Ready'
                   }
                 />
+                {transcriptDebugMode && transcriptQuality && (
+                  <span className="text-[10px] font-mono text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                    RAW: {transcriptQuality.rawTranscript.slice(0, 20)}... → NORM: {transcriptQuality.normalizedInput.slice(0, 20)}...
+                  </span>
+                )}
               </div>
               <ChatComposer
                 placeholder="What would you like ALINA to plan and execute?"

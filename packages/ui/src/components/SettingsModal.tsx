@@ -1,3 +1,5 @@
+'use client';
+
 import { useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import * as Tabs from '@radix-ui/react-tabs';
@@ -11,6 +13,10 @@ import {
   Moon,
   FolderLock,
   CheckCircle2,
+  Mic,
+  Volume2,
+  Sparkles,
+  Terminal,
 } from 'lucide-react';
 import { Button } from './Button';
 
@@ -19,6 +25,20 @@ export interface SettingsModalProps {
   onOpenChange: (open: boolean) => void;
   theme?: 'light' | 'dark';
   onThemeChange?: (theme: 'light' | 'dark') => void;
+  // Voice & Persona Settings Props
+  voiceEnabled?: boolean;
+  onVoiceEnabledChange?: (enabled: boolean) => void;
+  wakeWordEnabled?: boolean;
+  onWakeWordEnabledChange?: (enabled: boolean) => void;
+  voiceSpeed?: number;
+  onVoiceSpeedChange?: (speed: number) => void;
+  voiceVolume?: number;
+  onVoiceVolumeChange?: (volume: number) => void;
+  selectedVoiceId?: string;
+  onSelectedVoiceIdChange?: (voiceId: string) => void;
+  availableVoices?: Array<{ id: string; name: string; lang: string; gender?: string }>;
+  transcriptDebugMode?: boolean;
+  onTranscriptDebugModeChange?: (enabled: boolean) => void;
 }
 
 export function SettingsModal({
@@ -26,6 +46,19 @@ export function SettingsModal({
   onOpenChange,
   theme = 'light',
   onThemeChange,
+  voiceEnabled = true,
+  onVoiceEnabledChange,
+  wakeWordEnabled = false,
+  onWakeWordEnabledChange,
+  voiceSpeed = 1.0,
+  onVoiceSpeedChange,
+  voiceVolume = 1.0,
+  onVoiceVolumeChange,
+  selectedVoiceId,
+  onSelectedVoiceIdChange,
+  availableVoices = [],
+  transcriptDebugMode = false,
+  onTranscriptDebugModeChange,
 }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState('general');
   const [approvalAlwaysRequired, setApprovalAlwaysRequired] = useState(true);
@@ -36,7 +69,7 @@ export function SettingsModal({
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 bg-stone-900/60 backdrop-blur-sm z-50 transition-opacity animate-in fade-in" />
-        <Dialog.Content className="fixed left-[50%] top-[50%] max-h-[85vh] w-[90vw] max-w-2xl translate-x-[-50%] translate-y-[-50%] rounded-xl bg-white dark:bg-stone-900 shadow-2xl border border-stone-200 dark:border-stone-800 z-50 focus:outline-none overflow-hidden flex flex-col animate-in fade-in zoom-in-95">
+        <Dialog.Content className="fixed left-[50%] top-[50%] max-h-[85vh] w-[94vw] sm:w-[90vw] max-w-2xl translate-x-[-50%] translate-y-[-50%] rounded-xl bg-white dark:bg-stone-900 shadow-2xl border border-stone-200 dark:border-stone-800 z-50 focus:outline-none overflow-hidden flex flex-col animate-in fade-in zoom-in-95">
           {/* Header */}
           <div className="flex items-center justify-between px-6 py-4 border-b border-stone-100 dark:border-stone-800">
             <div className="flex items-center space-x-2.5">
@@ -60,13 +93,20 @@ export function SettingsModal({
           {/* Tabs Container */}
           <Tabs.Root value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col md:flex-row overflow-hidden">
             {/* Sidebar Tabs List */}
-            <Tabs.List className="w-full md:w-48 bg-stone-50 dark:bg-stone-950/60 border-b md:border-b-0 md:border-r border-stone-100 dark:border-stone-800 p-2 space-y-1">
+            <Tabs.List className="w-full md:w-48 bg-stone-50 dark:bg-stone-950/60 border-b md:border-b-0 md:border-r border-stone-100 dark:border-stone-800 p-2 space-y-1 shrink-0">
               <Tabs.Trigger
                 value="general"
                 className="w-full flex items-center space-x-2.5 px-3 py-2 text-xs font-medium rounded-lg text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800/60 data-[state=active]:bg-white dark:data-[state=active]:bg-stone-800 data-[state=active]:text-stone-900 dark:data-[state=active]:text-stone-100 data-[state=active]:shadow-xs transition-colors"
               >
                 <Sliders className="w-3.5 h-3.5" />
                 <span>General</span>
+              </Tabs.Trigger>
+              <Tabs.Trigger
+                value="voice"
+                className="w-full flex items-center space-x-2.5 px-3 py-2 text-xs font-medium rounded-lg text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800/60 data-[state=active]:bg-white dark:data-[state=active]:bg-stone-800 data-[state=active]:text-stone-900 dark:data-[state=active]:text-stone-100 data-[state=active]:shadow-xs transition-colors"
+              >
+                <Mic className="w-3.5 h-3.5 text-amber-600" />
+                <span>Voice & Persona</span>
               </Tabs.Trigger>
               <Tabs.Trigger
                 value="security"
@@ -92,7 +132,7 @@ export function SettingsModal({
             </Tabs.List>
 
             {/* Tab Contents */}
-            <div className="flex-1 p-6 overflow-y-auto max-h-[500px]">
+            <div className="flex-1 p-5 sm:p-6 overflow-y-auto max-h-[500px]">
               {/* General Tab */}
               <Tabs.Content value="general" className="space-y-5 focus:outline-none">
                 <div>
@@ -145,6 +185,148 @@ export function SettingsModal({
                       <div
                         className={`w-5 h-5 rounded-full bg-white transition-transform ${
                           telemetryEnabled ? 'translate-x-4' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
+                </div>
+              </Tabs.Content>
+
+              {/* Voice & Persona Tab */}
+              <Tabs.Content value="voice" className="space-y-5 focus:outline-none">
+                <div>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="text-sm font-semibold text-stone-900 dark:text-stone-100 flex items-center">
+                        <Sparkles className="w-4 h-4 mr-1.5 text-amber-500" />
+                        Alina Natural Female Voice
+                      </h4>
+                      <p className="text-xs text-stone-500 mt-0.5">
+                        Calm, warm, intelligent, and subtle conversational voice.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => onVoiceEnabledChange?.(!voiceEnabled)}
+                      className={`w-10 h-6 rounded-full transition-colors relative flex items-center px-0.5 shrink-0 ${
+                        voiceEnabled ? 'bg-amber-600' : 'bg-stone-200 dark:bg-stone-700'
+                      }`}
+                    >
+                      <div
+                        className={`w-5 h-5 rounded-full bg-white transition-transform ${
+                          voiceEnabled ? 'translate-x-4' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  {/* Voice Selector */}
+                  <div className="mt-4">
+                    <label className="text-[11px] font-mono text-stone-500 uppercase tracking-wider">
+                      Selected Neural Voice
+                    </label>
+                    <select
+                      value={selectedVoiceId || ''}
+                      onChange={(e) => onSelectedVoiceIdChange?.(e.target.value)}
+                      className="mt-1 w-full px-3 py-2 rounded-lg bg-stone-50 dark:bg-stone-950 border border-stone-200 dark:border-stone-800 text-xs font-sans text-stone-800 dark:text-stone-200 focus:outline-none focus:border-amber-500"
+                    >
+                      {availableVoices.length > 0 ? (
+                        availableVoices.map((v) => (
+                          <option key={v.id} value={v.id}>
+                            {v.name} ({v.lang}){v.gender ? ` • ${v.gender}` : ''}
+                          </option>
+                        ))
+                      ) : (
+                        <option value="">Default Natural Female Voice (Jenny / Aria / Samantha)</option>
+                      )}
+                    </select>
+                  </div>
+
+                  {/* Speed and Volume */}
+                  <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <div className="flex justify-between text-xs text-stone-600 dark:text-stone-400">
+                        <span>Speaking Speed</span>
+                        <span className="font-mono">{voiceSpeed.toFixed(1)}x</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0.7"
+                        max="1.4"
+                        step="0.1"
+                        value={voiceSpeed}
+                        onChange={(e) => onVoiceSpeedChange?.(parseFloat(e.target.value))}
+                        className="w-full mt-1.5 accent-amber-600"
+                      />
+                    </div>
+                    <div>
+                      <div className="flex justify-between text-xs text-stone-600 dark:text-stone-400">
+                        <span>Voice Volume</span>
+                        <span className="font-mono">{Math.round(voiceVolume * 100)}%</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0.1"
+                        max="1.0"
+                        step="0.05"
+                        value={voiceVolume}
+                        onChange={(e) => onVoiceVolumeChange?.(parseFloat(e.target.value))}
+                        className="w-full mt-1.5 accent-amber-600"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Wake-Word ("Hey Alina") Section */}
+                <div className="pt-4 border-t border-stone-100 dark:border-stone-800">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="text-sm font-semibold text-stone-900 dark:text-stone-100 flex items-center">
+                        <Volume2 className="w-4 h-4 mr-1.5 text-amber-600" />
+                        "Hey Alina" Wake-Word Activation
+                      </h4>
+                      <p className="text-xs text-stone-500 mt-0.5">
+                        Detects activation locally on-device. Audio is never continuously streamed to cloud services.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => onWakeWordEnabledChange?.(!wakeWordEnabled)}
+                      className={`w-10 h-6 rounded-full transition-colors relative flex items-center px-0.5 shrink-0 ml-4 ${
+                        wakeWordEnabled ? 'bg-amber-600' : 'bg-stone-200 dark:bg-stone-700'
+                      }`}
+                    >
+                      <div
+                        className={`w-5 h-5 rounded-full bg-white transition-transform ${
+                          wakeWordEnabled ? 'translate-x-4' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Transcript Quality Debug Mode */}
+                <div className="pt-4 border-t border-stone-100 dark:border-stone-800">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="text-sm font-semibold text-stone-900 dark:text-stone-100 flex items-center">
+                        <Terminal className="w-4 h-4 mr-1.5 text-stone-500" />
+                        Transcript Quality & Debug Mode
+                      </h4>
+                      <p className="text-xs text-stone-500 mt-0.5">
+                        Captures RAW, FINAL, and NORMALIZED phonetic transcripts internally for quality verification.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => onTranscriptDebugModeChange?.(!transcriptDebugMode)}
+                      className={`w-10 h-6 rounded-full transition-colors relative flex items-center px-0.5 shrink-0 ml-4 ${
+                        transcriptDebugMode ? 'bg-amber-600' : 'bg-stone-200 dark:bg-stone-700'
+                      }`}
+                    >
+                      <div
+                        className={`w-5 h-5 rounded-full bg-white transition-transform ${
+                          transcriptDebugMode ? 'translate-x-4' : 'translate-x-0'
                         }`}
                       />
                     </button>

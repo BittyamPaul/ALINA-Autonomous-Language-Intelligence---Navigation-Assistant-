@@ -1,14 +1,31 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { VoiceState, VoiceTranscript, VoiceErrorReason } from '@alina/shared';
+import {
+  VoiceState,
+  VoiceTranscript,
+  VoiceErrorReason,
+  VoiceOption,
+  TranscriptQualityTier,
+} from '@alina/shared';
+import {
+  WebNeuralSpeechProvider,
+  EnhancedSpeechRecognitionCoordinator,
+  AlinaWakeWordDetector,
+} from '@/lib/voice-client';
 
 export interface UseVoiceInteractionOptions {
   onCommandTranscribed?: (transcript: string) => void;
   language?: string;
   voiceRate?: number;
   voicePitch?: number;
+  voiceVolume?: number;
+  voiceId?: string;
   ttsEnabled?: boolean;
+  wakeWordEnabled?: boolean;
+  wakeWordSensitivity?: number;
+  silenceTimeoutMs?: number;
+  onTranscriptQuality?: (quality: TranscriptQualityTier) => void;
 }
 
 interface ISpeechRecognitionResultItem {
@@ -162,59 +179,46 @@ class ClientSpeechRecognition {
   }
 }
 
-/**
- * Client-safe Web Speech Synthesis helper.
- */
-class ClientSpeechSynthesis {
-  public isAvailable(): boolean {
-    return typeof window !== 'undefined' && 'speechSynthesis' in window;
-  }
-
-  public async speak(
-    text: string,
-    options?: { rate?: number; pitch?: number; language?: string }
-  ): Promise<void> {
-    if (!this.isAvailable()) return;
-
-    this.stop();
-
-    return new Promise((resolve, reject) => {
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = options?.rate ?? 1.0;
-      utterance.pitch = options?.pitch ?? 1.0;
-      utterance.lang = options?.language ?? 'en-US';
-
-      utterance.onend = () => resolve();
-      utterance.onerror = (err) => reject(new Error(`Speech synthesis error: ${err.error}`));
-
-      window.speechSynthesis.speak(utterance);
-    });
-  }
-
-  public stop(): void {
-    if (this.isAvailable()) {
-      window.speechSynthesis.cancel();
-    }
-  }
-
-  public isSpeaking(): boolean {
-    return this.isAvailable() && window.speechSynthesis.speaking;
-  }
-}
-
 export function useVoiceInteraction(options?: UseVoiceInteractionOptions) {
   const [voiceState, setVoiceState] = useState<VoiceState>('idle');
   const [interimTranscript, setInterimTranscript] = useState<string>('');
   const [voiceErrorMessage, setVoiceErrorMessage] = useState<string | undefined>();
+  const [isWakeWordListening, setIsWakeWordListening] = useState<boolean>(false);
+  const [availableVoices, setAvailableVoices] = useState<VoiceOption[]>([]);
+  const [selectedVoice, setSelectedVoice] = useState<VoiceOption | null>(null);
+  const [transcriptQuality, setTranscriptQuality] = useState<TranscriptQualityTier | null>(null);
 
   const sttRef = useRef<ClientSpeechRecognition | null>(null);
-  const ttsRef = useRef<ClientSpeechSynthesis | null>(null);
+  const ttsRef = useRef<WebNeuralSpeechProvider | null>(null);
+  const wakeWordRef = useRef<AlinaWakeWordDetector | null>(null);
+  const coordinatorRef = useRef<EnhancedSpeechRecognitionCoordinator | null>(null);
+
   const onCommandTranscribedRef = useRef(options?.onCommandTranscribed);
   onCommandTranscribedRef.current = options?.onCommandTranscribed;
 
+  const onTranscriptQualityRef = useRef(options?.onTranscriptQuality);
+  onTranscriptQualityRef.current = options?.onTranscriptQuality;
+
+  // Initialize Speech Coordinator & TTS Provider
   useEffect(() => {
     sttRef.current = new ClientSpeechRecognition();
-    ttsRef.current = new ClientSpeechSynthesis();
+    const tts = new WebNeuralSpeechProvider(options?.voiceId);
+    ttsRef.current = tts;
+
+    // Load and select natural female voices
+    tts.getAvailableVoices().then((voices) => {
+      setAvailableVoices(voices);
+      const chosen = tts.getSelectedVoice();
+      if (chosen) {
+        setSelectedVoice(chosen);
+      }
+    });
+
+    // Enhanced STT Coordinator with configurable silence endpointing
+    const coordinator = new EnhancedSpeechRecognitionCoordinator({
+      silenceTimeoutMs: options?.silenceTimeoutMs ?? 1500,
+    });
+    coordinatorRef.current = coordinator;
 
     // Keyboard shortcut: Escape halts active speech or listening
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -228,8 +232,9 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions) {
       window.removeEventListener('keydown', handleKeyDown);
       ttsRef.current?.stop();
       sttRef.current?.abort();
+      wakeWordRef.current?.stop();
     };
-  }, []);
+  }, [options?.voiceId, options?.silenceTimeoutMs]);
 
   const interrupt = useCallback(() => {
     if (ttsRef.current) {
@@ -238,16 +243,44 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions) {
     if (sttRef.current) {
       sttRef.current.abort();
     }
+    if (coordinatorRef.current) {
+      coordinatorRef.current.reset();
+    }
     setVoiceState('interrupted');
     setInterimTranscript('');
     setTimeout(() => {
       setVoiceState('idle');
+      if (options?.wakeWordEnabled && wakeWordRef.current) {
+        wakeWordRef.current.start();
+        setIsWakeWordListening(true);
+      }
     }, 150);
+  }, [options?.wakeWordEnabled]);
+
+  const commitCommand = useCallback((quality: TranscriptQualityTier) => {
+    setTranscriptQuality(quality);
+    if (onTranscriptQualityRef.current) {
+      onTranscriptQualityRef.current(quality);
+    }
+
+    const command = quality.normalizedInput.trim();
+    if (command && onCommandTranscribedRef.current) {
+      setVoiceState('processing');
+      onCommandTranscribedRef.current(command);
+    } else {
+      setVoiceState('idle');
+    }
   }, []);
 
   const startListening = useCallback(async () => {
     setVoiceErrorMessage(undefined);
     setInterimTranscript('');
+
+    // Pause wake-word detector while actively listening for command
+    if (wakeWordRef.current) {
+      wakeWordRef.current.stop();
+      setIsWakeWordListening(false);
+    }
 
     if (ttsRef.current?.isSpeaking()) {
       ttsRef.current.stop();
@@ -255,28 +288,38 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions) {
 
     if (!sttRef.current || !sttRef.current.isAvailable()) {
       setVoiceState('error');
-      setVoiceErrorMessage('Speech recognition is not supported in this browser. Please use text input.');
+      setVoiceErrorMessage('Speech recognition is not supported in this browser. Please use text composer.');
       setTimeout(() => setVoiceState('idle'), 3000);
       return;
+    }
+
+    if (coordinatorRef.current) {
+      coordinatorRef.current.reset();
     }
 
     setVoiceState('listening');
 
     sttRef.current.start(
       (t: VoiceTranscript) => {
-        if (t.isFinal) {
-          setInterimTranscript('');
-          setVoiceState('processing');
-          if (onCommandTranscribedRef.current && t.text.trim()) {
-            onCommandTranscribedRef.current(t.text.trim());
+        if (!coordinatorRef.current) return;
+
+        // Process through Smart Endpointing Coordinator
+        coordinatorRef.current.handleTranscriptEvent(
+          t,
+          (quality: TranscriptQualityTier) => {
+            // Triggered when natural silence endpoint is reached
+            sttRef.current?.stop();
+            setInterimTranscript('');
+            commitCommand(quality);
+          },
+          (currentCombined: string) => {
+            setInterimTranscript(currentCombined);
           }
-        } else {
-          setInterimTranscript(t.interimText || t.text);
-        }
+        );
       },
       (reason: VoiceErrorReason, _message: string) => {
         setVoiceState('error');
-        let friendly = 'Voice recognition error. Falling back to text composer.';
+        let friendly = 'Voice recognition error. Switched to text composer.';
         if (reason === 'microphone_denied') {
           friendly = 'Microphone permission denied. Switched to text composer.';
         } else if (reason === 'speech_service_unavailable') {
@@ -287,24 +330,49 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions) {
         setVoiceErrorMessage(friendly);
         setTimeout(() => {
           setVoiceState('idle');
+          if (options?.wakeWordEnabled && wakeWordRef.current) {
+            wakeWordRef.current.start();
+            setIsWakeWordListening(true);
+          }
         }, 3000);
       },
       () => {
-        setVoiceState((prev) => (prev === 'listening' ? 'idle' : prev));
+        // Recognition ended: flush any uncommitted accumulated text
+        if (coordinatorRef.current) {
+          coordinatorRef.current.finalize((quality) => {
+            if (quality.normalizedInput.trim()) {
+              commitCommand(quality);
+            } else {
+              setVoiceState('idle');
+              if (options?.wakeWordEnabled && wakeWordRef.current) {
+                wakeWordRef.current.start();
+                setIsWakeWordListening(true);
+              }
+            }
+          });
+        } else {
+          setVoiceState((prev) => (prev === 'listening' ? 'idle' : prev));
+        }
       },
       options?.language || 'en-US'
     );
-  }, [options?.language]);
+  }, [options?.language, options?.wakeWordEnabled, commitCommand]);
 
   const stopListening = useCallback(async () => {
     if (sttRef.current) {
       sttRef.current.stop();
     }
-  }, []);
+    if (coordinatorRef.current) {
+      coordinatorRef.current.finalize((quality) => {
+        setInterimTranscript('');
+        commitCommand(quality);
+      });
+    }
+  }, [commitCommand]);
 
   const speakSummary = useCallback(
     async (text: string) => {
-      if (!options?.ttsEnabled && options?.ttsEnabled !== undefined) {
+      if (options?.ttsEnabled === false) {
         return;
       }
       if (!ttsRef.current || !ttsRef.current.isAvailable() || !text.trim()) {
@@ -316,16 +384,78 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions) {
         await ttsRef.current.speak(text, {
           rate: options?.voiceRate ?? 1.0,
           pitch: options?.voicePitch ?? 1.0,
+          volume: options?.voiceVolume ?? 1.0,
           language: options?.language ?? 'en-US',
+          voiceId: options?.voiceId,
         });
       } catch {
         // Audio output error is non-fatal
       } finally {
         setVoiceState('idle');
+        if (options?.wakeWordEnabled && wakeWordRef.current) {
+          wakeWordRef.current.start();
+          setIsWakeWordListening(true);
+        }
       }
     },
-    [options?.ttsEnabled, options?.voiceRate, options?.voicePitch, options?.language]
+    [options?.ttsEnabled, options?.voiceRate, options?.voicePitch, options?.voiceVolume, options?.language, options?.voiceId, options?.wakeWordEnabled]
   );
+
+  // Wake-word ("Hey Alina") initialization & background listener
+  useEffect(() => {
+    if (!options?.wakeWordEnabled) {
+      if (wakeWordRef.current) {
+        wakeWordRef.current.stop();
+        setIsWakeWordListening(false);
+      }
+      return;
+    }
+
+    const wakeWord = new AlinaWakeWordDetector({
+      sensitivity: options?.wakeWordSensitivity ?? 0.7,
+      onDetected: (_evt) => {
+        // "Hey Alina" trigger confirmed locally on-device
+        wakeWord.stop();
+        setIsWakeWordListening(false);
+        // Transition straight to listening
+        startListening();
+      },
+      onError: (err) => {
+        console.warn('[WakeWord] Local detector notice:', err.message);
+      },
+    });
+
+    wakeWordRef.current = wakeWord;
+    wakeWord.start();
+    setIsWakeWordListening(true);
+
+    return () => {
+      wakeWord.stop();
+      setIsWakeWordListening(false);
+    };
+  }, [options?.wakeWordEnabled, options?.wakeWordSensitivity, startListening]);
+
+  const toggleWakeWord = useCallback((enabled: boolean) => {
+    if (wakeWordRef.current) {
+      if (enabled) {
+        wakeWordRef.current.start();
+        setIsWakeWordListening(true);
+      } else {
+        wakeWordRef.current.stop();
+        setIsWakeWordListening(false);
+      }
+    }
+  }, []);
+
+  const selectVoice = useCallback((voiceId: string) => {
+    if (ttsRef.current) {
+      ttsRef.current.setVoice(voiceId);
+      const chosen = ttsRef.current.getSelectedVoice();
+      if (chosen) {
+        setSelectedVoice(chosen);
+      }
+    }
+  }, []);
 
   const clearVoiceError = useCallback(() => {
     setVoiceErrorMessage(undefined);
@@ -336,10 +466,16 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions) {
     setVoiceState,
     interimTranscript,
     voiceErrorMessage,
+    isWakeWordListening,
+    availableVoices,
+    selectedVoice,
+    transcriptQuality,
     startListening,
     stopListening,
     interrupt,
     speakSummary,
     clearVoiceError,
+    toggleWakeWord,
+    selectVoice,
   };
 }

@@ -33,6 +33,19 @@ const nextConfig = {
         playwright: 'commonjs playwright',
         'playwright-core': 'commonjs playwright-core',
       });
+    } else {
+      config.resolve = config.resolve || {};
+      config.resolve.fallback = {
+        ...config.resolve.fallback,
+        fs: false,
+        'fs/promises': false,
+        path: false,
+        os: false,
+        crypto: false,
+        child_process: false,
+        net: false,
+        tls: false,
+      };
     }
     return config;
   },

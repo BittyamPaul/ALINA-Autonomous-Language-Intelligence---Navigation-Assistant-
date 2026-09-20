@@ -20,3 +20,4 @@ export * from './multiagent/research-agent';
 export * from './multiagent/document-agent';
 export * from './multiagent/task-delegator';
 export * from './voice';
+export * from './personality/alina-personality';

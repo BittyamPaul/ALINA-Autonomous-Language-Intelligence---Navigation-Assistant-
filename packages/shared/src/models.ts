@@ -268,10 +268,62 @@ export type VoiceErrorReason = z.infer<typeof VoiceErrorReasonSchema>;
 
 export const VoiceSessionConfigSchema = z.object({
   autoSubmitOnSilence: z.boolean().default(true),
-  silenceTimeoutMs: z.number().positive().default(2000),
+  silenceTimeoutMs: z.number().positive().default(1500),
   ttsEnabled: z.boolean().default(true),
   voiceRate: z.number().min(0.5).max(2.0).default(1.0),
   voicePitch: z.number().min(0.5).max(2.0).default(1.0),
+  voiceVolume: z.number().min(0.0).max(1.0).default(1.0),
+  voiceId: z.string().optional(),
+  voiceGender: z.enum(['female', 'male', 'neutral']).default('female'),
   language: z.string().default('en-US'),
+  wakeWordEnabled: z.boolean().default(true),
+  wakeWordPhrase: z.string().default('Hey Alina'),
+  wakeWordSensitivity: z.number().min(0.1).max(1.0).default(0.7),
+  transcriptDebugMode: z.boolean().default(false),
 });
 export type VoiceSessionConfig = z.infer<typeof VoiceSessionConfigSchema>;
+
+export const VoiceOptionSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  lang: z.string(),
+  gender: z.enum(['female', 'male', 'neutral']).default('female'),
+  isNatural: z.boolean().default(false),
+  isDefault: z.boolean().default(false),
+});
+export type VoiceOption = z.infer<typeof VoiceOptionSchema>;
+
+export const TextToSpeechOptionsSchema = z.object({
+  rate: z.number().min(0.5).max(2.0).optional(),
+  pitch: z.number().min(0.5).max(2.0).optional(),
+  volume: z.number().min(0.0).max(1.0).optional(),
+  language: z.string().optional(),
+  voiceId: z.string().optional(),
+});
+export type TextToSpeechOptions = z.infer<typeof TextToSpeechOptionsSchema>;
+
+export const AlinaPersonalityConfigSchema = z.object({
+  name: z.string().default('Alina'),
+  tone: z.enum(['warm_calm', 'professional', 'concise']).default('warm_calm'),
+  verbosity: z.enum(['concise', 'balanced', 'detailed']).default('concise'),
+  conversationalFamiliarity: z.enum(['familiar', 'formal']).default('familiar'),
+  useMemoryContext: z.boolean().default(true),
+});
+export type AlinaPersonalityConfig = z.infer<typeof AlinaPersonalityConfigSchema>;
+
+export const TranscriptQualityTierSchema = z.object({
+  rawTranscript: z.string(),
+  finalTranscript: z.string(),
+  normalizedInput: z.string(),
+  confidence: z.number().min(0).max(1).default(1),
+  substitutionsCount: z.number().default(0),
+  timestamp: z.string().default(() => new Date().toISOString()),
+});
+export type TranscriptQualityTier = z.infer<typeof TranscriptQualityTierSchema>;
+
+export const WakeWordEventSchema = z.object({
+  detectedPhrase: z.string(),
+  confidence: z.number().min(0).max(1).default(0.9),
+  timestamp: z.string().default(() => new Date().toISOString()),
+});
+export type WakeWordEvent = z.infer<typeof WakeWordEventSchema>;

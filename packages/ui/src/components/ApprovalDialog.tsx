@@ -1,3 +1,5 @@
+'use client';
+
 import { useEffect, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import {
@@ -36,7 +38,7 @@ export interface ApprovalDialogProps {
 export function ApprovalDialog({
   open,
   onOpenChange,
-  title = 'Human Authorization Required',
+  title = 'Alina needs your permission',
   action = 'execute',
   target,
   source,
@@ -101,7 +103,7 @@ export function ApprovalDialog({
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 bg-stone-900/60 backdrop-blur-sm z-50 transition-opacity animate-in fade-in" />
-        <Dialog.Content className="fixed left-[50%] top-[50%] max-h-[90vh] w-[90vw] max-w-lg translate-x-[-50%] translate-y-[-50%] rounded-xl bg-white dark:bg-stone-900 p-6 shadow-2xl border border-stone-200 dark:border-stone-800 z-50 focus:outline-none overflow-y-auto animate-in fade-in zoom-in-95">
+        <Dialog.Content className="fixed left-[50%] top-[50%] max-h-[90vh] w-[94vw] sm:w-[90vw] max-w-lg translate-x-[-50%] translate-y-[-50%] rounded-xl bg-white dark:bg-stone-900 p-4 sm:p-6 shadow-2xl border border-stone-200 dark:border-stone-800 z-50 focus:outline-none overflow-y-auto animate-in fade-in zoom-in-95">
           {/* Header */}
           <div className="flex items-start justify-between">
             <div className="flex items-center space-x-3">

@@ -1,3 +1,5 @@
+'use client';
+
 import { useState, useEffect, useMemo } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import {
