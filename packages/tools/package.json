@@ -1,0 +1,25 @@
+{
+  "name": "@alina/tools",
+  "version": "0.1.0",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs,esm --dts",
+    "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@alina/mcp": "workspace:*",
+    "@alina/shared": "workspace:*",
+    "@tauri-apps/api": "^2.2.0",
+    "fast-glob": "^3.3.3",
+    "playwright": "^1.63.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@alina/config": "workspace:*",
+    "tsup": "^8.3.6",
+    "typescript": "^5.7.3"
+  }
+}

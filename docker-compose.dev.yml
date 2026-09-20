@@ -1,0 +1,37 @@
+# ==============================================================================
+# ALINA — Docker Compose Development Override
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+# Or:    pnpm docker:dev
+# ==============================================================================
+services:
+  surrealdb:
+    entrypoint:
+      - /surreal
+      - start
+      - --log
+      - debug
+      - --user
+      - ${SURREAL_USERNAME:-root}
+      - --pass
+      - ${SURREAL_PASSWORD:-root}
+      - surrealkv://data/alina-dev.db
+
+  alina-server:
+    environment:
+      - NODE_ENV=development
+      - NEXT_PUBLIC_APP_ENV=development
+      - ALINA_LOG_LEVEL=debug
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/apps/desktop/.next
+      - /app/packages/shared/dist
+      - /app/packages/ui/dist
+      - /app/packages/database/dist
+      - /app/packages/tools/dist
+      - /app/packages/agent/dist
+      - /app/packages/mcp/dist
+    command: ["pnpm", "--filter", "@alina/desktop", "dev", "-p", "3000"]
+
+  db-init:
+    command: ["pnpm", "--filter", "@alina/database", "db:seed"]

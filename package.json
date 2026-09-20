@@ -1,0 +1,34 @@
+{
+  "name": "alina-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.12.4",
+  "scripts": {
+    "build": "turbo build",
+    "dev": "turbo dev",
+    "lint": "turbo lint",
+    "test": "turbo test",
+    "typecheck": "turbo typecheck && tsc --noEmit",
+    "clean": "turbo clean",
+    "db:init": "pnpm --filter @alina/database db:init",
+    "db:seed": "pnpm --filter @alina/database db:seed",
+    "docker:dev": "docker compose -f docker-compose.yml -f docker-compose.dev.yml up",
+    "docker:prod": "docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d",
+    "docker:build": "docker compose build",
+    "docker:down": "docker compose down",
+    "docker:db:init": "docker compose run --rm db-init",
+    "docker:db:seed": "docker compose run --rm db-init pnpm --filter @alina/database db:seed"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.4",
+    "@typescript-eslint/eslint-plugin": "^8.70.0",
+    "@typescript-eslint/parser": "^8.70.0",
+    "eslint": "^10.11.0",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.4.2",
+    "turbo": "^2.11.2",
+    "tsx": "^4.23.13",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.6"
+  }
+}

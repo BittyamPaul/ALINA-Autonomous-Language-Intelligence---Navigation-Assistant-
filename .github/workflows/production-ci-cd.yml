@@ -1,0 +1,240 @@
+name: ALINA Production CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, 'release/**']
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  NODE_ENV: test
+  CI: true
+  TURBO_TELEMETRY_DISABLED: 1
+  NEXT_TELEMETRY_DISABLED: 1
+  ALINA_LOG_LEVEL: info
+  LOG_FORMAT: json
+
+jobs:
+  # ============================================================================
+  # Stages 1 to 7: Verification, Code Quality, Security & Multi-Layer Tests
+  # ============================================================================
+  verify-and-test:
+    name: Verify, Quality & Test Pipeline (Stages 1-7)
+    runs-on: ubuntu-latest
+
+    services:
+      surrealdb:
+        image: surrealdb/surrealdb:v2.2.1
+        ports:
+          - 8000:8000
+        env:
+          SURREAL_USER: root
+          SURREAL_PASS: root
+        options: >-
+          --health-cmd "surreal is-ready || exit 1"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+        command: start --log trace --user root --pass root memory
+
+    steps:
+      - name: Check out source code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install pnpm package manager
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.12.4
+
+      - name: Set up Node.js 22 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: 'pnpm'
+
+      # ------------------------------------------------------------------------
+      # Stage 1: Install dependencies
+      # ------------------------------------------------------------------------
+      - name: Stage 1 — Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # ------------------------------------------------------------------------
+      # Stage 2: Type check
+      # ------------------------------------------------------------------------
+      - name: Stage 2 — Type check
+        run: pnpm run typecheck
+
+      # ------------------------------------------------------------------------
+      # Stage 3: Lint
+      # ------------------------------------------------------------------------
+      - name: Stage 3 — Lint
+        run: pnpm run lint
+
+      # ------------------------------------------------------------------------
+      # Stage 4: Unit tests
+      # ------------------------------------------------------------------------
+      - name: Stage 4 — Unit tests
+        run: npx vitest run packages/ --reporter=verbose
+
+      # ------------------------------------------------------------------------
+      # Stage 5: Integration tests
+      # ------------------------------------------------------------------------
+      - name: Stage 5 — Integration tests
+        env:
+          SURREAL_ENDPOINT: http://127.0.0.1:8000/rpc
+          SURREAL_NAMESPACE: alina_ci
+          SURREAL_DATABASE: main_ci
+          SURREAL_USERNAME: root
+          SURREAL_PASSWORD: root
+        run: npx vitest run tests/ --reporter=verbose
+
+      # ------------------------------------------------------------------------
+      # Stage 6: Build
+      # ------------------------------------------------------------------------
+      - name: Stage 6 — Build packages & desktop distribution bundle
+        run: pnpm run build
+
+      # ------------------------------------------------------------------------
+      # Stage 7: E2E tests where practical
+      # ------------------------------------------------------------------------
+      - name: Stage 7 — E2E tests (Health Probes & Production Scenario Verification)
+        env:
+          SURREAL_ENDPOINT: http://127.0.0.1:8000/rpc
+          SURREAL_NAMESPACE: alina_ci
+          SURREAL_DATABASE: main_ci
+        run: |
+          npx vitest run tests/production-scenarios.test.ts tests/production-deployment.test.ts --reporter=verbose
+
+  # ============================================================================
+  # Stage 8: Production Artifact Creation (Desktop & Headless Services)
+  # ============================================================================
+  create-desktop-artifacts:
+    name: Stage 8 — Desktop Artifacts (${{ matrix.platform.name }})
+    needs: [verify-and-test]
+    if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    runs-on: ${{ matrix.platform.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - name: Windows x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - name: macOS Universal
+            os: macos-latest
+            target: universal-apple-darwin
+          - name: Linux x86_64
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+
+    steps:
+      - name: Check out source code
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.12.4
+
+      - name: Set up Node.js 22 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: 'pnpm'
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform.target }}
+
+      - name: Install Linux system dependencies (WebKitGTK, AppIndicator)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libasound2-dev \
+            libssl-dev
+
+      - name: Install Monorepo Dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Compile Monorepo Packages & Frontend UI
+        run: pnpm run build
+
+      - name: Build Tauri Desktop Native Bundle
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_KEY_PASSWORD }}
+        with:
+          projectPath: ./apps/desktop
+          tagName: ${{ github.ref_name }}
+          releaseName: 'ALINA Release ${{ github.ref_name }}'
+          releaseBody: 'Production distribution build of ALINA Autonomous PC Companion.'
+          releaseDraft: true
+          prerelease: false
+
+      - name: Archive Desktop Production Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: alina-desktop-${{ matrix.platform.target }}
+          path: |
+            apps/desktop/src-tauri/target/release/bundle/
+          if-no-files-found: warn
+
+  create-backend-container-artifact:
+    name: Stage 8 — Backend Production Container Image
+    needs: [verify-and-test]
+    if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Check out source code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata & tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}/alina-server
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=sha,format=short
+
+      - name: Build and Push Headless Production Image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./infrastructure/docker/Dockerfile.server
+          push: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

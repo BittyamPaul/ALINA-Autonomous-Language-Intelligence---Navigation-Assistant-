@@ -1,0 +1,96 @@
+services:
+  # ============================================================================
+  # 1. SurrealDB Multi-Model Database Service
+  # ============================================================================
+  surrealdb:
+    image: surrealdb/surrealdb:v2.2.1
+    container_name: alina-surrealdb
+    entrypoint:
+      - /surreal
+      - start
+      - --log
+      - info
+      - --user
+      - ${SURREAL_USERNAME:-root}
+      - --pass
+      - ${SURREAL_PASSWORD:-root}
+      - surrealkv://data/alina.db
+    ports:
+      - "${DOCKER_SURREALDB_PORT:-8000}:8000"
+    volumes:
+      - surreal-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "/surreal is-ready --user ${SURREAL_USERNAME:-root} --pass ${SURREAL_PASSWORD:-root} || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+    networks:
+      - alina-network
+
+  # ============================================================================
+  # 2. ALINA Application & API Server (Headless Core)
+  # ============================================================================
+  alina-server:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.server
+    container_name: alina-server
+    ports:
+      - "${DOCKER_SERVER_PORT:-3000}:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - HOST=0.0.0.0
+      - SURREAL_ENDPOINT=http://surrealdb:8000/rpc
+      - SURREAL_NAMESPACE=${SURREAL_NAMESPACE:-alina}
+      - SURREAL_DATABASE=${SURREAL_DATABASE:-main}
+      - SURREAL_USERNAME=${SURREAL_USERNAME:-root}
+      - SURREAL_PASSWORD=${SURREAL_PASSWORD:-root}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      - ALINA_LOG_LEVEL=${ALINA_LOG_LEVEL:-info}
+      - ALINA_TELEMETRY_ENABLED=${ALINA_TELEMETRY_ENABLED:-true}
+    depends_on:
+      surrealdb:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - alina-network
+
+  # ============================================================================
+  # 3. Database Initializer & Migration Runner (On-Demand / One-Shot)
+  # ============================================================================
+  db-init:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.db-init
+    container_name: alina-db-init
+    environment:
+      - SURREAL_ENDPOINT=http://surrealdb:8000/rpc
+      - SURREAL_NAMESPACE=${SURREAL_NAMESPACE:-alina}
+      - SURREAL_DATABASE=${SURREAL_DATABASE:-main}
+      - SURREAL_USERNAME=${SURREAL_USERNAME:-root}
+      - SURREAL_PASSWORD=${SURREAL_PASSWORD:-root}
+      - DB_INIT_MAX_ATTEMPTS=20
+    depends_on:
+      surrealdb:
+        condition: service_healthy
+    restart: "no"
+    profiles:
+      - init
+      - setup
+    networks:
+      - alina-network
+
+volumes:
+  surreal-data:
+    name: alina-surreal-data
+
+networks:
+  alina-network:
+    name: alina-bridge-network
+    driver: bridge

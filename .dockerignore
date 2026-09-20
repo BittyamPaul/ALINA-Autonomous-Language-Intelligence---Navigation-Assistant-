@@ -1,0 +1,44 @@
+# Dependencies
+node_modules
+npm-debug.log
+yarn-error.log
+pnpm-debug.log
+
+# Build Outputs
+dist
+.next
+out
+build
+target
+
+# Turbo Cache
+.turbo
+
+# Git & System
+.git
+.gitignore
+.DS_Store
+*.pem
+
+# Environment & Secrets (NEVER bake into image)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Rust & Tauri Desktop Artifacts
+apps/desktop/src-tauri/target
+apps/desktop/src-tauri/gen
+
+# Testing & Scratch Artifacts
+.test-sandbox
+scratch
+tests/**/*.log
+coverage
+
+# IDE & Editor Settings
+.idea
+.vscode
+*.sublime-project
+*.sublime-workspace

@@ -1,0 +1,4 @@
+#V2
+RELATE (type::record('task', '1'))->contains_step->(type::record('task_step', '2'));
+BEGIN TRANSACTION; UPSERT type::record('task', 't1') CONTENT { id: 't1', title: 'Test Task' }; UPSERT type::record('task_step', 's1') CONTENT { id: 's1', title: 'Step 1' }; RELATE (type::record('task', 't1'))->contains_step->(type::record('task_step', 's1')) SET step_index = 0; COMMIT TRANSACTION;
+DELETE task_step:s1; DELETE task:t1;

@@ -1,0 +1,90 @@
+# ==============================================================================
+# ALINA Application & API Server — Multi-Stage Production Dockerfile
+# ==============================================================================
+# Stage 1: Base Environment
+# ------------------------------------------------------------------------------
+FROM node:22-alpine AS base
+
+WORKDIR /app
+
+RUN apk add --no-cache libc6-compat dumb-init
+RUN corepack enable && corepack prepare pnpm@10.12.4 --activate
+
+# ------------------------------------------------------------------------------
+# Stage 2: Dependencies Installation
+# ------------------------------------------------------------------------------
+FROM base AS deps
+
+WORKDIR /app
+
+# Copy root monorepo manifests
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
+
+# Copy package.json manifests for all packages and apps
+COPY packages/shared/package.json ./packages/shared/
+COPY packages/config/package.json ./packages/config/
+COPY packages/ui/package.json ./packages/ui/
+COPY packages/database/package.json ./packages/database/
+COPY packages/tools/package.json ./packages/tools/
+COPY packages/agent/package.json ./packages/agent/
+COPY packages/mcp/package.json ./packages/mcp/
+COPY apps/desktop/package.json ./apps/desktop/
+COPY apps/web/package.json ./apps/web/
+
+# Install full workspace dependencies
+RUN pnpm install --frozen-lockfile
+
+# ------------------------------------------------------------------------------
+# Stage 3: Build Monorepo & Applications
+# ------------------------------------------------------------------------------
+FROM base AS builder
+
+WORKDIR /app
+
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/packages ./packages
+COPY --from=deps /app/apps ./apps
+COPY . .
+
+ENV NODE_ENV=production
+ENV STANDALONE=true
+ENV NEXT_TELEMETRY_DISABLED=1
+
+# Compile shared libraries & Next.js desktop application
+RUN pnpm run build
+
+# ------------------------------------------------------------------------------
+# Stage 4: Minimal Production Runner
+# ------------------------------------------------------------------------------
+FROM base AS runner
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV PORT=3000
+ENV HOST=0.0.0.0
+ENV NEXT_TELEMETRY_DISABLED=1
+
+# Create unprivileged system group & user
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 nextjs
+
+# Copy built artifacts and dependencies
+COPY --from=builder /app/package.json ./package.json
+COPY --from=builder /app/pnpm-workspace.yaml ./pnpm-workspace.yaml
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/packages ./packages
+COPY --from=builder /app/apps/desktop ./apps/desktop
+
+# Set ownership to unprivileged user
+RUN chown -R nextjs:nodejs /app
+
+USER nextjs
+
+EXPOSE 3000
+
+HEALTHCHECK --interval=20s --timeout=5s --start-period=15s --retries=3 \
+  CMD wget -qO- http://127.0.0.1:3000/api/health || exit 1
+
+ENTRYPOINT ["/usr/bin/dumb-init", "--"]
+CMD ["pnpm", "--filter", "@alina/desktop", "start"]

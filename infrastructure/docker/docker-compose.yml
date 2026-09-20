@@ -1,0 +1,22 @@
+services:
+  surrealdb:
+    image: surrealdb/surrealdb:v2.2.1
+    container_name: alina-surrealdb
+    entrypoint:
+      - /surreal
+      - start
+      - --log
+      - info
+      - --user
+      - root
+      - --pass
+      - root
+      - surrealkv://data/alina.db
+    ports:
+      - "8000:8000"
+    volumes:
+      - surreal-data:/data
+    restart: unless-stopped
+
+volumes:
+  surreal-data:

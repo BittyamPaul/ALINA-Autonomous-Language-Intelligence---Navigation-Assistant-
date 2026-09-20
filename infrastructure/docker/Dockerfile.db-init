@@ -1,0 +1,40 @@
+# ==============================================================================
+# ALINA Database Initializer & Migration Runner Dockerfile
+# ==============================================================================
+FROM node:22-alpine
+
+WORKDIR /app
+
+RUN apk add --no-cache libc6-compat dumb-init
+RUN corepack enable && corepack prepare pnpm@10.12.4 --activate
+
+# Copy root monorepo manifests
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
+
+# Copy required package manifests
+COPY packages/shared/package.json ./packages/shared/
+COPY packages/config/package.json ./packages/config/
+COPY packages/database/package.json ./packages/database/
+
+# Install dependencies for database and shared packages
+RUN pnpm install --frozen-lockfile
+
+# Copy source code
+COPY packages/config ./packages/config
+COPY packages/shared ./packages/shared
+COPY packages/database ./packages/database
+COPY tsconfig.base.json ./
+
+# Build dependencies
+RUN pnpm --filter @alina/shared build && \
+    pnpm --filter @alina/database build
+
+# Create unprivileged runner
+RUN addgroup --system --gid 1001 alina && \
+    adduser --system --uid 1001 dbinit -G alina && \
+    chown -R dbinit:alina /app
+
+USER dbinit
+
+ENTRYPOINT ["/usr/bin/dumb-init", "--"]
+CMD ["pnpm", "--filter", "@alina/database", "db:init"]

@@ -1,0 +1,50 @@
+{
+  "extends": "../../packages/config/tsconfig/nextjs.json",
+  "compilerOptions": {
+    "paths": {
+      "@/*": [
+        "./src/*"
+      ],
+      "@alina/shared": [
+        "../../packages/shared/src/index.ts"
+      ],
+      "@alina/ui": [
+        "../../packages/ui/src/index.ts"
+      ],
+      "@alina/tools": [
+        "../../packages/tools/src/index.ts"
+      ],
+      "@alina/agent": [
+        "../../packages/agent/src/index.ts"
+      ],
+      "@alina/database": [
+        "../../packages/database/src/index.ts"
+      ],
+      "@alina/mcp": [
+        "../../packages/mcp/src/index.ts"
+      ]
+    },
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ]
+  },
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    "../../packages/agent/src/**/*.ts",
+    "../../packages/database/src/**/*.ts",
+    "../../packages/mcp/src/**/*.ts",
+    "../../packages/shared/src/**/*.ts",
+    "../../packages/tools/src/**/*.ts",
+    "../../packages/ui/src/**/*.ts",
+    "../../packages/ui/src/**/*.tsx",
+    ".next/types/**/*.ts",
+    "next-env.d.ts",
+    "out/types/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}
