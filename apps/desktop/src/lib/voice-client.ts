@@ -291,6 +291,37 @@ export function normalizeSpeechTranscript(rawText: string): { normalized: string
   return { normalized, substitutions };
 }
 
+export function mergeTranscriptSegmentsSafely(existing: string, incoming: string): string {
+  const eClean = existing.trim();
+  const iClean = incoming.trim();
+
+  if (!eClean) return iClean;
+  if (!iClean) return eClean;
+
+  const eLower = eClean.toLowerCase();
+  const iLower = iClean.toLowerCase();
+
+  if (eLower === iLower) return eClean;
+  if (iLower.startsWith(eLower)) return iClean;
+  if (eLower.endsWith(iLower)) return eClean;
+
+  const eWords = eClean.split(/\s+/);
+  const iWords = iClean.split(/\s+/);
+  const maxOverlap = Math.min(eWords.length, iWords.length);
+
+  for (let k = maxOverlap; k > 0; k--) {
+    const eSuffix = eWords.slice(eWords.length - k).map((w) => w.toLowerCase()).join(' ');
+    const iPrefix = iWords.slice(0, k).map((w) => w.toLowerCase()).join(' ');
+
+    if (eSuffix === iPrefix) {
+      const mergedWords = [...eWords, ...iWords.slice(k)];
+      return mergedWords.join(' ');
+    }
+  }
+
+  return `${eClean} ${iClean}`;
+}
+
 export const applyPhoneticNormalization = normalizeSpeechTranscript;
 
 interface ISpeechRecognitionResultItem {
@@ -403,7 +434,7 @@ export class EnhancedSpeechRecognitionCoordinator {
         if (result.isFinal) {
           const part = result[0].transcript.trim();
           if (part) {
-            this.rawBuffer = this.rawBuffer ? `${this.rawBuffer} ${part}` : part;
+            this.rawBuffer = mergeTranscriptSegmentsSafely(this.rawBuffer, part);
           }
         } else {
           currentInterim = `${currentInterim} ${result[0].transcript}`;
@@ -450,18 +481,14 @@ export class EnhancedSpeechRecognitionCoordinator {
 
     if (event.isFinal) {
       if (event.text.trim()) {
-        if (this.rawBuffer) {
-          this.rawBuffer += ' ' + event.text.trim();
-        } else {
-          this.rawBuffer = event.text.trim();
-        }
+        this.rawBuffer = mergeTranscriptSegmentsSafely(this.rawBuffer, event.text);
       }
       this.interimBuffer = '';
     } else {
       this.interimBuffer = event.interimText || event.text;
     }
 
-    const currentCombined = (this.rawBuffer + (this.interimBuffer ? ' ' + this.interimBuffer : '')).trim();
+    const currentCombined = mergeTranscriptSegmentsSafely(this.rawBuffer, this.interimBuffer);
     if (onInterimUpdate) {
       onInterimUpdate(currentCombined);
     }
@@ -488,7 +515,7 @@ export class EnhancedSpeechRecognitionCoordinator {
   }
 
   public flush(): VoiceTranscript | null {
-    const raw = `${this.rawBuffer} ${this.interimBuffer}`.trim();
+    const raw = mergeTranscriptSegmentsSafely(this.rawBuffer, this.interimBuffer).trim();
     if (!raw) {
       this.reset('idle');
       return null;

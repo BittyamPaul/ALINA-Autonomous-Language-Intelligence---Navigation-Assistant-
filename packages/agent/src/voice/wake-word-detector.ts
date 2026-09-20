@@ -1,4 +1,5 @@
 import { WakeWordEvent } from '@alina/shared';
+import { WakeWordProvider } from './types';
 
 export interface WakeWordDetectorOptions {
   triggerPhrase?: string;
@@ -11,26 +12,32 @@ export interface WakeWordDetectorOptions {
  * AlinaWakeWordDetector
  * 
  * Local, on-device background wake-word engine listening for "Hey Alina".
+ * Implements the decoupled WakeWordProvider interface.
  * 
  * Guarantees:
  * - Operates entirely within the local browser/webview without continuous remote streaming.
  * - Does not record or persist ambient background speech until the wake trigger is confirmed.
  * - Supports sensitivity adjustment and graceful platform fallback.
  */
-export class AlinaWakeWordDetector {
+export class AlinaWakeWordDetector implements WakeWordProvider {
+  public readonly providerName = 'alina_wake_word_detector';
   private recognition: any = null;
   private active = false;
   private triggerPhrase = 'hey alina';
   private sensitivity = 0.7;
-  private onDetected?: (event: WakeWordEvent) => void;
-  private onError?: (err: Error) => void;
-  private restartTimeout: any = null;
+  private detectedListeners: Array<(event: WakeWordEvent) => void> = [];
+  private errorListeners: Array<(err: Error) => void> = [];
+  private restartTimeout: ReturnType<typeof setTimeout> | null = null;
 
   constructor(options: WakeWordDetectorOptions = {}) {
     this.triggerPhrase = (options.triggerPhrase || 'hey alina').toLowerCase();
     this.sensitivity = options.sensitivity ?? 0.7;
-    this.onDetected = options.onDetected;
-    this.onError = options.onError;
+    if (options.onDetected) {
+      this.detectedListeners.push(options.onDetected);
+    }
+    if (options.onError) {
+      this.errorListeners.push(options.onError);
+    }
 
     this.initRecognition();
   }
@@ -58,14 +65,14 @@ export class AlinaWakeWordDetector {
 
           this.recognition.onerror = (event: any) => {
             if (event.error === 'no-speech' || event.error === 'aborted') {
-              // Harmless timeout or pause, auto-restart if still active
               if (this.active) {
                 this.scheduleRestart();
               }
               return;
             }
-            if (this.onError) {
-              this.onError(new Error(`Wake word detection error: ${event.error}`));
+            const err = new Error(`Wake word detection error: ${event.error}`);
+            for (const listener of this.errorListeners) {
+              listener(err);
             }
           };
 
@@ -74,7 +81,7 @@ export class AlinaWakeWordDetector {
               this.scheduleRestart();
             }
           };
-        } catch (err) {
+        } catch {
           this.recognition = null;
         }
       }
@@ -105,6 +112,20 @@ export class AlinaWakeWordDetector {
     return this.sensitivity;
   }
 
+  public onDetected(callback: (event: WakeWordEvent) => void): () => void {
+    this.detectedListeners.push(callback);
+    return () => {
+      this.detectedListeners = this.detectedListeners.filter((cb) => cb !== callback);
+    };
+  }
+
+  public onError(callback: (err: Error) => void): () => void {
+    this.errorListeners.push(callback);
+    return () => {
+      this.errorListeners = this.errorListeners.filter((cb) => cb !== callback);
+    };
+  }
+
   public start(): boolean {
     if (!this.isAvailable() || this.active) {
       return false;
@@ -114,8 +135,7 @@ export class AlinaWakeWordDetector {
     try {
       this.recognition.start();
       return true;
-    } catch (err) {
-      // If already started or browser is busy, schedule retry
+    } catch {
       this.scheduleRestart();
       return true;
     }
@@ -132,6 +152,12 @@ export class AlinaWakeWordDetector {
         this.recognition.stop();
       } catch {}
     }
+  }
+
+  public cleanup(): void {
+    this.stop();
+    this.detectedListeners = [];
+    this.errorListeners = [];
   }
 
   private matchesWakeWord(transcript: string): boolean {
@@ -152,8 +178,8 @@ export class AlinaWakeWordDetector {
       timestamp: new Date().toISOString(),
     };
 
-    if (this.onDetected) {
-      this.onDetected(event);
+    for (const listener of this.detectedListeners) {
+      listener(event);
     }
   }
 
@@ -166,10 +192,93 @@ export class AlinaWakeWordDetector {
         try {
           this.recognition.start();
         } catch {
-          // Retry later if browser microphone session is transitioning
           this.scheduleRestart();
         }
       }
     }, 400);
+  }
+}
+
+/**
+ * MockWakeWordProvider
+ * 
+ * Deterministic in-memory implementation of WakeWordProvider for tests and headless runtimes.
+ */
+export class MockWakeWordProvider implements WakeWordProvider {
+  public readonly providerName = 'mock_wake_word_provider';
+  private active = false;
+  private triggerPhrase = 'hey alina';
+  private sensitivity = 0.7;
+  private detectedListeners: Array<(event: WakeWordEvent) => void> = [];
+  private errorListeners: Array<(err: Error) => void> = [];
+
+  public isAvailable(): boolean {
+    return true;
+  }
+
+  public isActive(): boolean {
+    return this.active;
+  }
+
+  public start(): boolean {
+    this.active = true;
+    return true;
+  }
+
+  public stop(): void {
+    this.active = false;
+  }
+
+  public cleanup(): void {
+    this.active = false;
+    this.detectedListeners = [];
+    this.errorListeners = [];
+  }
+
+  public setTriggerPhrase(phrase: string): void {
+    this.triggerPhrase = phrase.toLowerCase().trim();
+  }
+
+  public getTriggerPhrase(): string {
+    return this.triggerPhrase;
+  }
+
+  public setSensitivity(sensitivity: number): void {
+    this.sensitivity = sensitivity;
+  }
+
+  public getSensitivity(): number {
+    return this.sensitivity;
+  }
+
+  public onDetected(callback: (event: WakeWordEvent) => void): () => void {
+    this.detectedListeners.push(callback);
+    return () => {
+      this.detectedListeners = this.detectedListeners.filter((cb) => cb !== callback);
+    };
+  }
+
+  public onError(callback: (err: Error) => void): () => void {
+    this.errorListeners.push(callback);
+    return () => {
+      this.errorListeners = this.errorListeners.filter((cb) => cb !== callback);
+    };
+  }
+
+  public simulateWakeWord(phrase = 'hey alina', confidence = 0.95): void {
+    const event: WakeWordEvent = {
+      detectedPhrase: phrase,
+      confidence,
+      timestamp: new Date().toISOString(),
+    };
+    for (const listener of this.detectedListeners) {
+      listener(event);
+    }
+  }
+
+  public simulateError(err: Error): void {
+    for (const listener of this.errorListeners) {
+      listener(err);
+    }
   }
 }

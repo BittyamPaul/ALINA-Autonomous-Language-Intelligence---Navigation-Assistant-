@@ -327,6 +327,66 @@ export const VoiceErrorReasonSchema = z.enum([
 ]);
 export type VoiceErrorReason = z.infer<typeof VoiceErrorReasonSchema>;
 
+export const VoicePrivacySettingsSchema = z.object({
+  allowRawAudioRecording: z.boolean().default(false),
+  ephemeralProcessingOnly: z.boolean().default(true),
+  enableTelemetry: z.boolean().default(true),
+  anonymizeTranscripts: z.boolean().default(false),
+  retainAudioDataOnDisk: z.boolean().default(false),
+});
+export type VoicePrivacySettings = z.infer<typeof VoicePrivacySettingsSchema>;
+
+export const VoiceProfileSchema = z.object({
+  name: z.string().default('Alina Natural Female'),
+  gender: z.enum(['female', 'male', 'neutral']).default('female'),
+  tone: z.enum(['warm', 'calm', 'intelligent', 'natural', 'conversational', 'professional']).default('warm'),
+  rate: z.number().min(0.5).max(2.0).default(1.0),
+  pitch: z.number().min(0.5).max(2.0).default(1.0),
+  volume: z.number().min(0.0).max(1.0).default(1.0),
+  preferredVoices: z.array(z.string()).default([]),
+  description: z.string().default('Warm, calm, intelligent, natural, conversational, professional female voice persona'),
+});
+export type VoiceProfile = z.infer<typeof VoiceProfileSchema>;
+
+export const DEFAULT_NATURAL_FEMALE_PROFILE: VoiceProfile = {
+  name: 'Alina Natural Female',
+  gender: 'female',
+  tone: 'warm',
+  rate: 1.0,
+  pitch: 1.0,
+  volume: 1.0,
+  preferredVoices: [
+    'microsoft jenny online (natural)',
+    'microsoft aria online (natural)',
+    'microsoft michelle online (natural)',
+    'microsoft zira',
+    'google uk english female',
+    'google us english female',
+    'samantha (enhanced)',
+    'samantha',
+    'karen (enhanced)',
+    'karen',
+    'victoria',
+    'fiona',
+    'moira',
+    'tessa',
+  ],
+  description: 'Warm, calm, intelligent, natural, conversational, professional female voice persona (non-robotic)',
+};
+
+export const VoiceDiagnosticTelemetrySchema = z.object({
+  recognitionLatencyMs: z.number().default(0),
+  finalTranscriptLatencyMs: z.number().default(0),
+  interimTranscriptCount: z.number().default(0),
+  recognitionErrors: z.number().default(0),
+  wakeWordDetectionCount: z.number().default(0),
+  falseActivations: z.number().default(0),
+  conversationDurationMs: z.number().default(0),
+  interruptionsCount: z.number().default(0),
+  timestamp: z.string().default(() => new Date().toISOString()),
+});
+export type VoiceDiagnosticTelemetry = z.infer<typeof VoiceDiagnosticTelemetrySchema>;
+
 export const VoiceSessionConfigSchema = z.object({
   autoSubmitOnSilence: z.boolean().default(true),
   silenceTimeoutMs: z.number().positive().default(1500),
@@ -341,6 +401,8 @@ export const VoiceSessionConfigSchema = z.object({
   wakeWordPhrase: z.string().default('Hey Alina'),
   wakeWordSensitivity: z.number().min(0.1).max(1.0).default(0.7),
   transcriptDebugMode: z.boolean().default(false),
+  privacy: VoicePrivacySettingsSchema.default({}),
+  voiceProfile: VoiceProfileSchema.optional(),
 });
 export type VoiceSessionConfig = z.infer<typeof VoiceSessionConfigSchema>;
 
@@ -498,6 +560,53 @@ export function extractCommandAfterWakeWord(
   }
 
   return { isWake: false };
+}
+
+/**
+ * Safely merges streaming partial transcript chunks while eliminating word/phrase duplication.
+ */
+export function mergeTranscriptSegmentsSafely(existing: string, incoming: string): string {
+  const eClean = existing.trim();
+  const iClean = incoming.trim();
+
+  if (!eClean) return iClean;
+  if (!iClean) return eClean;
+
+  const eLower = eClean.toLowerCase();
+  const iLower = iClean.toLowerCase();
+
+  // 1. Direct duplicate
+  if (eLower === iLower) {
+    return eClean;
+  }
+
+  // 2. Incoming subsumes existing
+  if (iLower.startsWith(eLower)) {
+    return iClean;
+  }
+
+  // 3. Existing already ends with incoming
+  if (eLower.endsWith(iLower)) {
+    return eClean;
+  }
+
+  // 4. Token-level suffix-to-prefix overlap detection
+  const eWords = eClean.split(/\s+/);
+  const iWords = iClean.split(/\s+/);
+  const maxOverlap = Math.min(eWords.length, iWords.length);
+
+  for (let k = maxOverlap; k > 0; k--) {
+    const eSuffix = eWords.slice(eWords.length - k).map((w) => w.toLowerCase()).join(' ');
+    const iPrefix = iWords.slice(0, k).map((w) => w.toLowerCase()).join(' ');
+
+    if (eSuffix === iPrefix) {
+      const mergedWords = [...eWords, ...iWords.slice(k)];
+      return mergedWords.join(' ');
+    }
+  }
+
+  // 5. No overlap: append with single space
+  return `${eClean} ${iClean}`;
 }
 
 

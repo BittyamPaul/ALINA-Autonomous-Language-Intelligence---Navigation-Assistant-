@@ -1,27 +1,9 @@
 import {
   VoiceOption,
+  VoiceProfile,
   TextToSpeechOptions,
 } from '@alina/shared';
-
-/**
- * TextToSpeechProvider
- * 
- * Modular interface for speech synthesis engines (Web Neural, Edge/Cloud Neural, or Headless Mock).
- */
-export interface TextToSpeechProvider {
-  isAvailable(): boolean;
-  speak(text: string, options?: TextToSpeechOptions): Promise<void>;
-  stop(): void;
-  pause?(): void;
-  resume?(): void;
-  isSpeaking(): boolean;
-  getAvailableVoices(): Promise<VoiceOption[]>;
-  setVoice(voiceId: string): void;
-  setSpeed(speed: number): void;
-  setPitch(pitch: number): void;
-  setVolume(volume: number): void;
-  getSelectedVoice(): VoiceOption | undefined;
-}
+import { VoiceProvider } from './types';
 
 /**
  * Preferred natural female voice priority identifiers across modern platforms:
@@ -45,25 +27,64 @@ export const PREFERRED_NATURAL_FEMALE_VOICES = [
 ];
 
 /**
+ * Default Natural Female Voice Persona Profile
+ * Emphasizes warm, calm, intelligent, natural, conversational, professional acoustic characteristics.
+ */
+export const DEFAULT_NATURAL_FEMALE_PROFILE: VoiceProfile = {
+  name: 'Alina Natural Female',
+  gender: 'female',
+  tone: 'warm',
+  rate: 1.0,
+  pitch: 1.0,
+  volume: 1.0,
+  preferredVoices: PREFERRED_NATURAL_FEMALE_VOICES,
+  description: 'Warm, calm, intelligent, natural, conversational, professional female voice persona (non-robotic)',
+};
+
+/**
  * WebNeuralSpeechProvider
  * 
- * Production TextToSpeechProvider utilizing high-fidelity neural/natural female voices
- * available in browser and Tauri WebView environments.
+ * Production VoiceProvider utilizing high-fidelity neural/natural female voices
+ * available in browser, WebView, and Tauri desktop environments.
  */
-export class WebNeuralSpeechProvider implements TextToSpeechProvider {
+export class WebNeuralSpeechProvider implements VoiceProvider {
+  public readonly providerName = 'web_neural_speech';
   private selectedVoiceId?: string;
   private speed = 1.0;
   private pitch = 1.0;
   private volume = 1.0;
+  private profile: VoiceProfile = { ...DEFAULT_NATURAL_FEMALE_PROFILE };
   private activeUtterance: SpeechSynthesisUtterance | null = null;
   private cachedVoices: VoiceOption[] = [];
 
-  constructor(defaultVoiceId?: string) {
+  constructor(defaultVoiceId?: string, profile?: Partial<VoiceProfile>) {
     this.selectedVoiceId = defaultVoiceId;
+    if (profile) {
+      this.profile = { ...DEFAULT_NATURAL_FEMALE_PROFILE, ...profile };
+      this.speed = this.profile.rate;
+      this.pitch = this.profile.pitch;
+      this.volume = this.profile.volume;
+    }
   }
 
   public isAvailable(): boolean {
     return typeof window !== 'undefined' && 'speechSynthesis' in window;
+  }
+
+  public getVoiceProfile(): VoiceProfile {
+    return {
+      ...this.profile,
+      rate: this.speed,
+      pitch: this.pitch,
+      volume: this.volume,
+    };
+  }
+
+  public setVoiceProfile(profile: Partial<VoiceProfile>): void {
+    this.profile = { ...this.profile, ...profile };
+    if (profile.rate !== undefined) this.setSpeed(profile.rate);
+    if (profile.pitch !== undefined) this.setPitch(profile.pitch);
+    if (profile.volume !== undefined) this.setVolume(profile.volume);
   }
 
   public async getAvailableVoices(): Promise<VoiceOption[]> {
@@ -124,7 +145,6 @@ export class WebNeuralSpeechProvider implements TextToSpeechProvider {
         window.speechSynthesis.onvoiceschanged = () => {
           resolve(fetchAndMap());
         };
-        // Timeout fallback after 300ms if event doesn't fire
         setTimeout(() => resolve(fetchAndMap()), 300);
       }
     });
@@ -150,8 +170,12 @@ export class WebNeuralSpeechProvider implements TextToSpeechProvider {
     const pool = voices || this.cachedVoices;
     if (pool.length === 0) return undefined;
 
+    const prefs = this.profile.preferredVoices.length > 0
+      ? this.profile.preferredVoices
+      : PREFERRED_NATURAL_FEMALE_VOICES;
+
     // 1. Try explicit preferred names
-    for (const pref of PREFERRED_NATURAL_FEMALE_VOICES) {
+    for (const pref of prefs) {
       const match = pool.find(
         (v) => v.name.toLowerCase().includes(pref) || v.id.toLowerCase().includes(pref)
       );
@@ -193,7 +217,6 @@ export class WebNeuralSpeechProvider implements TextToSpeechProvider {
       utterance.volume = options?.volume ?? this.volume;
       utterance.lang = options?.language ?? 'en-US';
 
-      // Pick best natural female voice
       let chosenRawVoice: SpeechSynthesisVoice | undefined;
 
       const targetId = options?.voiceId ?? this.selectedVoiceId;
@@ -202,14 +225,16 @@ export class WebNeuralSpeechProvider implements TextToSpeechProvider {
       }
 
       if (!chosenRawVoice) {
-        // Evaluate preferred female natural voice list in order of precedence
-        for (const pref of PREFERRED_NATURAL_FEMALE_VOICES) {
+        const prefs = this.profile.preferredVoices.length > 0
+          ? this.profile.preferredVoices
+          : PREFERRED_NATURAL_FEMALE_VOICES;
+
+        for (const pref of prefs) {
           chosenRawVoice = rawVoices.find((v) => v.name.toLowerCase().includes(pref));
           if (chosenRawVoice) break;
         }
       }
 
-      // Fallback: any voice containing female or woman
       if (!chosenRawVoice) {
         chosenRawVoice = rawVoices.find((v) => {
           const lower = v.name.toLowerCase();
@@ -217,7 +242,6 @@ export class WebNeuralSpeechProvider implements TextToSpeechProvider {
         });
       }
 
-      // Final fallback: default voice
       if (chosenRawVoice) {
         utterance.voice = chosenRawVoice;
       }
@@ -263,23 +287,48 @@ export class WebNeuralSpeechProvider implements TextToSpeechProvider {
   public isSpeaking(): boolean {
     return this.isAvailable() && (window.speechSynthesis.speaking || this.activeUtterance !== null);
   }
+
+  public cleanup(): void {
+    this.stop();
+    this.cachedVoices = [];
+  }
 }
 
 /**
- * MockTextToSpeechProvider
+ * MockTextToSpeechProvider / MockVoiceProvider
  * 
- * Deterministic in-memory implementation of TextToSpeechProvider for unit tests and headless environments.
+ * Deterministic in-memory implementation of VoiceProvider for unit tests and headless environments.
  */
-export class MockTextToSpeechProvider implements TextToSpeechProvider {
+export class MockTextToSpeechProvider implements VoiceProvider {
+  public readonly providerName = 'mock_voice_provider';
   private speaking = false;
   private selectedVoiceId?: string;
   private speed = 1.0;
   private pitch = 1.0;
   private volume = 1.0;
+  private profile: VoiceProfile = { ...DEFAULT_NATURAL_FEMALE_PROFILE };
   public spokenHistory: string[] = [];
+  public interrupted = false;
+  private resolveSpeak?: () => void;
 
   public isAvailable(): boolean {
     return true;
+  }
+
+  public getVoiceProfile(): VoiceProfile {
+    return {
+      ...this.profile,
+      rate: this.speed,
+      pitch: this.pitch,
+      volume: this.volume,
+    };
+  }
+
+  public setVoiceProfile(profile: Partial<VoiceProfile>): void {
+    this.profile = { ...this.profile, ...profile };
+    if (profile.rate !== undefined) this.speed = profile.rate;
+    if (profile.pitch !== undefined) this.pitch = profile.pitch;
+    if (profile.volume !== undefined) this.volume = profile.volume;
   }
 
   public async getAvailableVoices(): Promise<VoiceOption[]> {
@@ -350,19 +399,38 @@ export class MockTextToSpeechProvider implements TextToSpeechProvider {
     };
   }
 
-  public async speak(text: string, _options?: TextToSpeechOptions): Promise<void> {
+  public async speak(text: string, options?: TextToSpeechOptions): Promise<void> {
+    this.interrupted = false;
     this.speaking = true;
     this.spokenHistory.push(text);
+
+    if (options?.rate !== undefined) this.speed = options.rate;
+    if (options?.pitch !== undefined) this.pitch = options.pitch;
+    if (options?.volume !== undefined) this.volume = options.volume;
+    if (options?.voiceId !== undefined) this.selectedVoiceId = options.voiceId;
+
     return new Promise((resolve) => {
-      setTimeout(() => {
+      this.resolveSpeak = () => {
         this.speaking = false;
         resolve();
+      };
+      setTimeout(() => {
+        if (this.speaking) {
+          this.speaking = false;
+          resolve();
+        }
       }, 20);
     });
   }
 
   public stop(): void {
-    this.speaking = false;
+    if (this.speaking) {
+      this.interrupted = true;
+      this.speaking = false;
+      if (this.resolveSpeak) {
+        this.resolveSpeak();
+      }
+    }
   }
 
   public pause(): void {
@@ -376,4 +444,12 @@ export class MockTextToSpeechProvider implements TextToSpeechProvider {
   public isSpeaking(): boolean {
     return this.speaking;
   }
+
+  public cleanup(): void {
+    this.stop();
+    this.spokenHistory = [];
+  }
 }
+
+export const MockVoiceProvider = MockTextToSpeechProvider;
+export type MockVoiceProvider = MockTextToSpeechProvider;

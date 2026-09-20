@@ -3,19 +3,30 @@ import {
   VoiceTranscript,
   VoiceErrorReason,
   VoiceSessionConfig,
+  TextToSpeechOptions,
+  VoiceOption,
+  VoiceProfile,
 } from '@alina/shared';
-import { SpeechToTextAdapter, TextToSpeechAdapter } from './types';
+import {
+  SpeechRecognitionProvider,
+  VoiceProvider,
+  SpeechRecognitionConfig,
+} from './types';
+import { DEFAULT_NATURAL_FEMALE_PROFILE } from './tts-provider';
 
 // ============================================================================
 // Web Speech Recognition Adapter (Browser / WebView / Tauri)
 // ============================================================================
 
-export class WebSpeechRecognitionAdapter implements SpeechToTextAdapter {
+export class WebSpeechRecognitionAdapter implements SpeechRecognitionProvider {
+  public readonly providerName = 'web_speech_recognition';
   private recognition: any = null;
   private isListening = false;
+  private language = 'en-US';
   private transcriptListeners: Array<(transcript: VoiceTranscript) => void> = [];
   private errorListeners: Array<(reason: VoiceErrorReason, message: string) => void> = [];
   private stateListeners: Array<(state: VoiceState) => void> = [];
+  private interruptionListeners: Array<() => void> = [];
 
   constructor() {
     if (typeof window !== 'undefined') {
@@ -31,7 +42,18 @@ export class WebSpeechRecognitionAdapter implements SpeechToTextAdapter {
     return this.recognition !== null;
   }
 
-  public async startListening(config?: Partial<VoiceSessionConfig>): Promise<void> {
+  public setLanguage(lang: string): void {
+    this.language = lang;
+    if (this.recognition) {
+      this.recognition.lang = lang;
+    }
+  }
+
+  public getLanguage(): string {
+    return this.language;
+  }
+
+  public async startListening(config?: Partial<VoiceSessionConfig> | SpeechRecognitionConfig): Promise<void> {
     if (!this.recognition) {
       this.notifyError('speech_service_unavailable', 'SpeechRecognition API is not supported in this environment.');
       return;
@@ -41,9 +63,12 @@ export class WebSpeechRecognitionAdapter implements SpeechToTextAdapter {
       return;
     }
 
-    this.recognition.continuous = true;
-    this.recognition.interimResults = true;
-    this.recognition.lang = config?.language || 'en-US';
+    const isContinuous = (config && 'continuous' in config) ? config.continuous : true;
+    const isInterim = (config && 'interimResults' in config) ? config.interimResults : true;
+    this.recognition.continuous = isContinuous ?? true;
+    this.recognition.interimResults = isInterim ?? true;
+    this.language = config?.language || this.language;
+    this.recognition.lang = this.language;
 
     this.recognition.onstart = () => {
       this.isListening = true;
@@ -119,6 +144,14 @@ export class WebSpeechRecognitionAdapter implements SpeechToTextAdapter {
     }
   }
 
+  public cleanup(): void {
+    this.abort();
+    this.transcriptListeners = [];
+    this.errorListeners = [];
+    this.stateListeners = [];
+    this.interruptionListeners = [];
+  }
+
   public onTranscript(callback: (transcript: VoiceTranscript) => void): () => void {
     this.transcriptListeners.push(callback);
     return () => {
@@ -137,6 +170,13 @@ export class WebSpeechRecognitionAdapter implements SpeechToTextAdapter {
     this.stateListeners.push(callback);
     return () => {
       this.stateListeners = this.stateListeners.filter((cb) => cb !== callback);
+    };
+  }
+
+  public onInterruption(callback: () => void): () => void {
+    this.interruptionListeners.push(callback);
+    return () => {
+      this.interruptionListeners = this.interruptionListeners.filter((cb) => cb !== callback);
     };
   }
 
@@ -164,14 +204,74 @@ export class WebSpeechRecognitionAdapter implements SpeechToTextAdapter {
 // Web Speech Synthesis Adapter (Browser / WebView / Tauri)
 // ============================================================================
 
-export class WebSpeechSynthesisAdapter implements TextToSpeechAdapter {
+export class WebSpeechSynthesisAdapter implements VoiceProvider {
+  public readonly providerName = 'web_speech_synthesis';
   private activeUtterance: any = null;
+  private speed = 1.0;
+  private pitch = 1.0;
+  private volume = 1.0;
+  private selectedVoiceId?: string;
+  private profile: VoiceProfile = { ...DEFAULT_NATURAL_FEMALE_PROFILE };
 
   public isAvailable(): boolean {
     return typeof window !== 'undefined' && 'speechSynthesis' in window;
   }
 
-  public async speak(text: string, config?: Partial<VoiceSessionConfig>): Promise<void> {
+  public getVoiceProfile(): VoiceProfile {
+    return { ...this.profile, rate: this.speed, pitch: this.pitch, volume: this.volume };
+  }
+
+  public setVoiceProfile(profile: Partial<VoiceProfile>): void {
+    this.profile = { ...this.profile, ...profile };
+    if (profile.rate !== undefined) this.speed = profile.rate;
+    if (profile.pitch !== undefined) this.pitch = profile.pitch;
+    if (profile.volume !== undefined) this.volume = profile.volume;
+  }
+
+  public async getAvailableVoices(): Promise<VoiceOption[]> {
+    if (!this.isAvailable()) return [];
+    const voices = window.speechSynthesis.getVoices();
+    return voices.map((v) => ({
+      id: v.voiceURI || v.name,
+      name: v.name,
+      lang: v.lang,
+      gender: v.name.toLowerCase().includes('female') ? 'female' : 'male',
+      isNatural: v.name.toLowerCase().includes('natural') || v.name.toLowerCase().includes('online'),
+      isDefault: v.default,
+    }));
+  }
+
+  public getSelectedVoice(): VoiceOption | undefined {
+    if (this.selectedVoiceId) {
+      return {
+        id: this.selectedVoiceId,
+        name: this.selectedVoiceId,
+        lang: 'en-US',
+        gender: 'female',
+        isNatural: true,
+        isDefault: false,
+      };
+    }
+    return undefined;
+  }
+
+  public setVoice(voiceId: string): void {
+    this.selectedVoiceId = voiceId;
+  }
+
+  public setSpeed(speed: number): void {
+    this.speed = speed;
+  }
+
+  public setPitch(pitch: number): void {
+    this.pitch = pitch;
+  }
+
+  public setVolume(volume: number): void {
+    this.volume = volume;
+  }
+
+  public async speak(text: string, options?: TextToSpeechOptions | Partial<VoiceSessionConfig>): Promise<void> {
     if (!this.isAvailable()) {
       return;
     }
@@ -180,9 +280,24 @@ export class WebSpeechSynthesisAdapter implements TextToSpeechAdapter {
 
     return new Promise((resolve, reject) => {
       const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = config?.voiceRate ?? 1.0;
-      utterance.pitch = config?.voicePitch ?? 1.0;
-      utterance.lang = config?.language ?? 'en-US';
+      const rate = ('rate' in (options || {})) ? (options as TextToSpeechOptions).rate : (options as Partial<VoiceSessionConfig>)?.voiceRate;
+      const pitch = ('pitch' in (options || {})) ? (options as TextToSpeechOptions).pitch : (options as Partial<VoiceSessionConfig>)?.voicePitch;
+      const volume = ('volume' in (options || {})) ? (options as TextToSpeechOptions).volume : (options as Partial<VoiceSessionConfig>)?.voiceVolume;
+
+      utterance.rate = rate ?? this.speed;
+      utterance.pitch = pitch ?? this.pitch;
+      utterance.volume = volume ?? this.volume;
+      utterance.lang = options?.language ?? 'en-US';
+
+      const targetVoiceId = ('voiceId' in (options || {}))
+        ? (options as TextToSpeechOptions)?.voiceId
+        : this.selectedVoiceId;
+
+      if (targetVoiceId && typeof window !== 'undefined') {
+        const voices = window.speechSynthesis.getVoices();
+        const found = voices.find((v) => v.voiceURI === targetVoiceId || v.name === targetVoiceId);
+        if (found) utterance.voice = found;
+      }
 
       utterance.onend = () => {
         this.activeUtterance = null;
@@ -221,24 +336,42 @@ export class WebSpeechSynthesisAdapter implements TextToSpeechAdapter {
   public isSpeaking(): boolean {
     return this.isAvailable() && (window.speechSynthesis.speaking || this.activeUtterance !== null);
   }
+
+  public cleanup(): void {
+    this.stop();
+  }
 }
 
 // ============================================================================
 // Mock Speech Recognition Adapter (Deterministic Headless Testing)
 // ============================================================================
 
-export class MockSpeechRecognitionAdapter implements SpeechToTextAdapter {
+export class MockSpeechRecognitionAdapter implements SpeechRecognitionProvider {
+  public readonly providerName = 'mock_speech_recognition';
   private active = false;
+  private language = 'en-US';
   private transcriptListeners: Array<(transcript: VoiceTranscript) => void> = [];
   private errorListeners: Array<(reason: VoiceErrorReason, message: string) => void> = [];
   private stateListeners: Array<(state: VoiceState) => void> = [];
+  private interruptionListeners: Array<() => void> = [];
 
   public isAvailable(): boolean {
     return true;
   }
 
-  public async startListening(_config?: Partial<VoiceSessionConfig>): Promise<void> {
+  public setLanguage(lang: string): void {
+    this.language = lang;
+  }
+
+  public getLanguage(): string {
+    return this.language;
+  }
+
+  public async startListening(config?: Partial<VoiceSessionConfig> | SpeechRecognitionConfig): Promise<void> {
     this.active = true;
+    if (config?.language) {
+      this.language = config.language;
+    }
     this.notifyState('listening');
   }
 
@@ -250,6 +383,14 @@ export class MockSpeechRecognitionAdapter implements SpeechToTextAdapter {
   public abort(): void {
     this.active = false;
     this.notifyState('idle');
+  }
+
+  public cleanup(): void {
+    this.active = false;
+    this.transcriptListeners = [];
+    this.errorListeners = [];
+    this.stateListeners = [];
+    this.interruptionListeners = [];
   }
 
   public isActive(): boolean {
@@ -268,10 +409,28 @@ export class MockSpeechRecognitionAdapter implements SpeechToTextAdapter {
     }
   }
 
+  public simulateInterim(interimText: string): void {
+    const transcript: VoiceTranscript = {
+      text: interimText,
+      isFinal: false,
+      confidence: 0.85,
+      interimText,
+    };
+    for (const cb of this.transcriptListeners) {
+      cb(transcript);
+    }
+  }
+
   public simulateError(reason: VoiceErrorReason, message: string): void {
     this.notifyState('error');
     for (const cb of this.errorListeners) {
       cb(reason, message);
+    }
+  }
+
+  public simulateInterruption(): void {
+    for (const cb of this.interruptionListeners) {
+      cb();
     }
   }
 
@@ -296,6 +455,13 @@ export class MockSpeechRecognitionAdapter implements SpeechToTextAdapter {
     };
   }
 
+  public onInterruption(callback: () => void): () => void {
+    this.interruptionListeners.push(callback);
+    return () => {
+      this.interruptionListeners = this.interruptionListeners.filter((cb) => cb !== callback);
+    };
+  }
+
   private notifyState(state: VoiceState): void {
     for (const cb of this.stateListeners) {
       cb(state);
@@ -307,17 +473,71 @@ export class MockSpeechRecognitionAdapter implements SpeechToTextAdapter {
 // Mock Speech Synthesis Adapter (Deterministic Headless Testing)
 // ============================================================================
 
-export class MockSpeechSynthesisAdapter implements TextToSpeechAdapter {
+export class MockSpeechSynthesisAdapter implements VoiceProvider {
+  public readonly providerName = 'mock_speech_synthesis';
   public spokenUtterances: string[] = [];
   public interrupted = false;
   private speaking = false;
   private resolveSpeak?: () => void;
+  private speed = 1.0;
+  private pitch = 1.0;
+  private volume = 1.0;
+  private profile: VoiceProfile = { ...DEFAULT_NATURAL_FEMALE_PROFILE };
 
   public isAvailable(): boolean {
     return true;
   }
 
-  public async speak(text: string, _config?: Partial<VoiceSessionConfig>): Promise<void> {
+  public getVoiceProfile(): VoiceProfile {
+    return { ...this.profile, rate: this.speed, pitch: this.pitch, volume: this.volume };
+  }
+
+  public setVoiceProfile(profile: Partial<VoiceProfile>): void {
+    this.profile = { ...this.profile, ...profile };
+    if (profile.rate !== undefined) this.speed = profile.rate;
+    if (profile.pitch !== undefined) this.pitch = profile.pitch;
+    if (profile.volume !== undefined) this.volume = profile.volume;
+  }
+
+  public async getAvailableVoices(): Promise<VoiceOption[]> {
+    return [
+      {
+        id: 'mock_natural_jenny',
+        name: 'Microsoft Jenny (Natural) - English (United States)',
+        lang: 'en-US',
+        gender: 'female',
+        isNatural: true,
+        isDefault: true,
+      },
+    ];
+  }
+
+  public getSelectedVoice(): VoiceOption | undefined {
+    return {
+      id: 'mock_natural_jenny',
+      name: 'Microsoft Jenny (Natural) - English (United States)',
+      lang: 'en-US',
+      gender: 'female',
+      isNatural: true,
+      isDefault: true,
+    };
+  }
+
+  public setVoice(_voiceId: string): void {}
+
+  public setSpeed(speed: number): void {
+    this.speed = speed;
+  }
+
+  public setPitch(pitch: number): void {
+    this.pitch = pitch;
+  }
+
+  public setVolume(volume: number): void {
+    this.volume = volume;
+  }
+
+  public async speak(text: string, _options?: TextToSpeechOptions | Partial<VoiceSessionConfig>): Promise<void> {
     this.interrupted = false;
     this.speaking = true;
     this.spokenUtterances.push(text);
@@ -327,13 +547,12 @@ export class MockSpeechSynthesisAdapter implements TextToSpeechAdapter {
         this.speaking = false;
         resolve();
       };
-      // Simulate quick natural speech delay (50ms in tests)
       setTimeout(() => {
         if (this.speaking) {
           this.speaking = false;
           resolve();
         }
-      }, 50);
+      }, 10);
     });
   }
 
@@ -357,5 +576,10 @@ export class MockSpeechSynthesisAdapter implements TextToSpeechAdapter {
 
   public isSpeaking(): boolean {
     return this.speaking;
+  }
+
+  public cleanup(): void {
+    this.stop();
+    this.spokenUtterances = [];
   }
 }

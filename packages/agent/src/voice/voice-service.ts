@@ -6,24 +6,28 @@ import {
   TranscriptQualityTier,
   WakeWordEvent,
   VoiceOption,
+  VoiceProfile,
   VoiceConversationMode,
   VoiceActivityState,
   VoiceConversationSession,
+  VoiceDiagnosticTelemetry,
   isTerminationPhrase,
   extractCommandAfterWakeWord,
 } from '@alina/shared';
 import {
-  SpeechToTextAdapter,
-  TextToSpeechAdapter,
+  SpeechRecognitionProvider,
+  VoiceProvider,
+  WakeWordProvider,
   VoiceInteractionResult,
   VoiceCoordinatorEvents,
 } from './types';
 import {
   WebSpeechRecognitionAdapter,
 } from './speech-adapters';
-import { TextToSpeechProvider, WebNeuralSpeechProvider } from './tts-provider';
+import { WebNeuralSpeechProvider } from './tts-provider';
 import { EnhancedSpeechRecognitionCoordinator } from './speech-recognition-service';
 import { AlinaWakeWordDetector } from './wake-word-detector';
+import { AlinaVoiceTelemetryTracker } from './voice-telemetry';
 import { AlinaConversationalPersona } from '../personality/alina-personality';
 import { AlinaSupervisorAgent } from '../supervisor-agent';
 
@@ -34,15 +38,16 @@ export interface EnhancedVoiceCoordinatorEvents extends VoiceCoordinatorEvents {
   onActivityStateChange?: (activityState: VoiceActivityState) => void;
   onSessionChange?: (session: VoiceConversationSession | null) => void;
   onInactivityWarning?: (prompt: string) => void;
+  onTelemetryUpdate?: (telemetry: VoiceDiagnosticTelemetry) => void;
 }
 
 export interface VoiceCoordinatorOptions {
   supervisorAgent: AlinaSupervisorAgent;
-  sttAdapter?: SpeechToTextAdapter;
-  ttsAdapter?: TextToSpeechAdapter | TextToSpeechProvider;
-  persona?: AlinaConversationalPersona;
-  wakeWordDetector?: AlinaWakeWordDetector;
+  sttAdapter?: SpeechRecognitionProvider;
+  ttsAdapter?: VoiceProvider;
+  wakeWordDetector?: WakeWordProvider;
   speechCoordinator?: EnhancedSpeechRecognitionCoordinator;
+  persona?: AlinaConversationalPersona;
   config?: Partial<VoiceSessionConfig>;
   events?: EnhancedVoiceCoordinatorEvents;
   jailRoot?: string;
@@ -52,25 +57,29 @@ export interface VoiceCoordinatorOptions {
 /**
  * AlinaVoiceCoordinator
  * 
- * Central coordinator managing ALINA's multimodal voice lifecycle with two distinct modes:
- * - MODE 1: WAKE MODE (listens only for "Hey Alina")
- * - MODE 2: CONVERSATION MODE (continuous hands-free multi-turn conversation)
+ * Central coordinator managing ALINA's modular voice lifecycle across 5 decoupled layers:
+ * 1. Wake-word detection (WakeWordProvider)
+ * 2. Speech-to-text (SpeechRecognitionProvider)
+ * 3. Natural-language processing (AlinaConversationalPersona)
+ * 4. Task execution (AlinaSupervisorAgent)
+ * 5. Text-to-speech (VoiceProvider - natural female persona)
  * 
  * Guarantees:
- * - Hands-free continuous interaction: does NOT require repeated button taps between sentences
- * - Voice Activity Detection (VAD): distinguishes thinking, speaking, user speaking, silence, end_of_utterance
- * - Natural conversation termination: supports "That's all, Alina", "Goodbye Alina", "Stop listening", "End conversation"
- * - Inactivity safety guards: prompts "Are you still there?" after inactivity, then returns cleanly to Wake Mode
- * - Instant interruption support: cuts off audio synthesis immediately on Escape or user action
- * - Full parity with text tasks: routes through identical supervisor & authorization gates
+ * - Hands-free continuous multi-turn dialogue in Conversation Mode
+ * - Immediate barge-in / interruption handling (halts TTS output when user speaks)
+ * - Word-level deduplication and safe interim/final transcript merging
+ * - Warm, calm, intelligent, natural, conversational female voice persona
+ * - Strict ephemeral processing: zero raw audio storage without explicit user permission
+ * - Full diagnostic telemetry tracking latencies, errors, wake activations, and durations
  */
 export class AlinaVoiceCoordinator {
   private supervisorAgent: AlinaSupervisorAgent;
-  private sttAdapter: SpeechToTextAdapter;
-  private ttsAdapter: TextToSpeechAdapter | TextToSpeechProvider;
+  private sttAdapter: SpeechRecognitionProvider;
+  private ttsAdapter: VoiceProvider;
   private persona: AlinaConversationalPersona;
   private speechCoordinator: EnhancedSpeechRecognitionCoordinator;
-  private wakeWordDetector?: AlinaWakeWordDetector;
+  private wakeWordDetector?: WakeWordProvider;
+  private telemetry = new AlinaVoiceTelemetryTracker();
   private config: VoiceSessionConfig;
   private events?: EnhancedVoiceCoordinatorEvents;
   private jailRoot?: string;
@@ -85,8 +94,9 @@ export class AlinaVoiceCoordinator {
   private activeTaskId?: string;
   private unsubscribeSttTranscript?: () => void;
   private unsubscribeSttError?: () => void;
-  private inactivityPromptTimer: any = null;
-  private inactivityCloseTimer: any = null;
+  private unsubscribeWakeDetected?: () => void;
+  private inactivityPromptTimer: ReturnType<typeof setTimeout> | null = null;
+  private inactivityCloseTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(options: VoiceCoordinatorOptions) {
     this.supervisorAgent = options.supervisorAgent;
@@ -98,6 +108,7 @@ export class AlinaVoiceCoordinator {
       new EnhancedSpeechRecognitionCoordinator({
         silenceTimeoutMs: options.config?.silenceTimeoutMs ?? 1500,
         debugMode: options.config?.transcriptDebugMode ?? false,
+        language: options.config?.language ?? 'en-US',
       });
     this.config = VoiceSessionConfigSchema.parse(options.config ?? {});
     this.events = options.events;
@@ -110,8 +121,18 @@ export class AlinaVoiceCoordinator {
       this.wakeWordDetector = new AlinaWakeWordDetector({
         triggerPhrase: this.config.wakeWordPhrase,
         sensitivity: this.config.wakeWordSensitivity,
-        onDetected: (event) => this.handleWakeWordTriggered(event),
       });
+    }
+
+    // Configure language and voice characteristics
+    if (this.sttAdapter.setLanguage) {
+      this.sttAdapter.setLanguage(this.config.language);
+    }
+    this.ttsAdapter.setSpeed(this.config.voiceRate);
+    this.ttsAdapter.setPitch(this.config.voicePitch);
+    this.ttsAdapter.setVolume(this.config.voiceVolume);
+    if (this.config.voiceId) {
+      this.ttsAdapter.setVoice(this.config.voiceId);
     }
 
     this.setupListeners();
@@ -158,14 +179,52 @@ export class AlinaVoiceCoordinator {
     return this.speechCoordinator;
   }
 
-  public getWakeWordDetector(): AlinaWakeWordDetector | undefined {
+  public getWakeWordDetector(): WakeWordProvider | undefined {
     return this.wakeWordDetector;
+  }
+
+  public getSttProvider(): SpeechRecognitionProvider {
+    return this.sttAdapter;
+  }
+
+  public getVoiceProvider(): VoiceProvider {
+    return this.ttsAdapter;
+  }
+
+  public getTelemetry(): VoiceDiagnosticTelemetry {
+    return this.telemetry.getTelemetry();
+  }
+
+  public isRawAudioRecordingAllowed(): boolean {
+    return Boolean(this.config.privacy?.allowRawAudioRecording);
+  }
+
+  public isEphemeralProcessingOnly(): boolean {
+    return this.config.privacy?.ephemeralProcessingOnly !== false;
   }
 
   public updateConfig(newConfig: Partial<VoiceSessionConfig>): void {
     this.config = VoiceSessionConfigSchema.parse({ ...this.config, ...newConfig });
     if (newConfig.silenceTimeoutMs) {
       this.speechCoordinator.setSilenceTimeout(newConfig.silenceTimeoutMs);
+    }
+    if (newConfig.language) {
+      this.speechCoordinator.setLanguage(newConfig.language);
+      if (this.sttAdapter.setLanguage) {
+        this.sttAdapter.setLanguage(newConfig.language);
+      }
+    }
+    if (newConfig.voiceRate !== undefined) {
+      this.ttsAdapter.setSpeed(newConfig.voiceRate);
+    }
+    if (newConfig.voicePitch !== undefined) {
+      this.ttsAdapter.setPitch(newConfig.voicePitch);
+    }
+    if (newConfig.voiceVolume !== undefined) {
+      this.ttsAdapter.setVolume(newConfig.voiceVolume);
+    }
+    if (newConfig.voiceId !== undefined) {
+      this.ttsAdapter.setVoice(newConfig.voiceId);
     }
     if (newConfig.transcriptDebugMode !== undefined) {
       this.speechCoordinator.setDebugMode(newConfig.transcriptDebugMode);
@@ -184,17 +243,31 @@ export class AlinaVoiceCoordinator {
   }
 
   public async getAvailableVoices(): Promise<VoiceOption[]> {
-    if ('getAvailableVoices' in this.ttsAdapter) {
-      return this.ttsAdapter.getAvailableVoices();
-    }
-    return [];
+    return this.ttsAdapter.getAvailableVoices();
   }
 
   public setVoice(voiceId: string): void {
     this.config.voiceId = voiceId;
-    if ('setVoice' in this.ttsAdapter) {
-      this.ttsAdapter.setVoice(voiceId);
-    }
+    this.ttsAdapter.setVoice(voiceId);
+  }
+
+  public setSpeed(speed: number): void {
+    this.config.voiceRate = speed;
+    this.ttsAdapter.setSpeed(speed);
+  }
+
+  public setPitch(pitch: number): void {
+    this.config.voicePitch = pitch;
+    this.ttsAdapter.setPitch(pitch);
+  }
+
+  public setVolume(volume: number): void {
+    this.config.voiceVolume = volume;
+    this.ttsAdapter.setVolume(volume);
+  }
+
+  public getVoiceProfile(): VoiceProfile {
+    return this.ttsAdapter.getVoiceProfile();
   }
 
   /**
@@ -203,6 +276,8 @@ export class AlinaVoiceCoordinator {
    */
   public startConversationSession(conversationId?: string): VoiceConversationSession {
     this.clearInactivityTimers();
+    this.telemetry.startSession();
+
     const session: VoiceConversationSession = {
       session_id: `vcs_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       started_at: new Date().toISOString(),
@@ -229,6 +304,7 @@ export class AlinaVoiceCoordinator {
     if (this.events?.onSessionChange) {
       this.events.onSessionChange(session);
     }
+    this.emitTelemetry();
 
     return session;
   }
@@ -238,6 +314,8 @@ export class AlinaVoiceCoordinator {
    */
   public endConversationSession(_closingReason = 'user_requested'): void {
     this.clearInactivityTimers();
+    this.telemetry.endSession();
+
     if (this.currentSession) {
       this.currentSession.state = 'ended';
       this.currentSession.last_activity = new Date().toISOString();
@@ -256,6 +334,7 @@ export class AlinaVoiceCoordinator {
 
     void this.sttAdapter.stopListening();
     this.resumeWakeWordIfNeeded();
+    this.emitTelemetry();
   }
 
   /**
@@ -290,6 +369,7 @@ export class AlinaVoiceCoordinator {
     this.transitionState('listening');
     this.transitionActivityState('listening');
 
+    this.telemetry.recordSpeechStart();
     this.resetInactivityTimers();
 
     try {
@@ -314,6 +394,7 @@ export class AlinaVoiceCoordinator {
     let committedGoal = '';
     this.speechCoordinator.finalize((quality) => {
       committedGoal = quality.normalizedInput;
+      this.telemetry.recordFinalTranscript();
       if (this.events?.onTranscriptQuality) {
         this.events.onTranscriptQuality(quality);
       }
@@ -338,6 +419,7 @@ export class AlinaVoiceCoordinator {
 
     if (wasSpeaking) {
       this.ttsAdapter.stop();
+      this.telemetry.recordInterruption();
     }
 
     if (wasListening) {
@@ -348,6 +430,7 @@ export class AlinaVoiceCoordinator {
     this.speechCoordinator.reset('idle');
     this.transitionState('interrupted');
     this.transitionActivityState('interrupted');
+    this.emitTelemetry();
 
     setTimeout(() => {
       if (this.currentState === 'interrupted') {
@@ -365,12 +448,13 @@ export class AlinaVoiceCoordinator {
 
   /**
    * Submits a transcribed voice command to the supervisor agent.
-   * Handles natural termination phrases, persona summaries, TTS synthesis,
+   * Handles natural termination phrases, persona summaries, natural female TTS synthesis,
    * and automatically loops back to listening when in Conversation Mode.
    */
   public async submitVoiceCommand(goal: string, autoResumeInConversation = true): Promise<VoiceInteractionResult> {
     const startTime = Date.now();
     this.clearInactivityTimers();
+    this.telemetry.markCommandReceived();
 
     // 1. Natural Termination Check: e.g. "That's all, Alina", "Goodbye Alina", "Stop listening", "End conversation"
     if (isTerminationPhrase(goal)) {
@@ -384,15 +468,13 @@ export class AlinaVoiceCoordinator {
 
       if (this.config.ttsEnabled && this.ttsAdapter.isAvailable()) {
         try {
-          if ('speak' in this.ttsAdapter) {
-            await (this.ttsAdapter as any).speak(closingSummary, {
-              rate: this.config.voiceRate,
-              pitch: this.config.voicePitch,
-              volume: this.config.voiceVolume,
-              language: this.config.language,
-              voiceId: this.config.voiceId,
-            });
-          }
+          await this.ttsAdapter.speak(closingSummary, {
+            rate: this.config.voiceRate,
+            pitch: this.config.voicePitch,
+            volume: this.config.voiceVolume,
+            language: this.config.language,
+            voiceId: this.config.voiceId,
+          });
         } catch {}
       }
 
@@ -405,6 +487,7 @@ export class AlinaVoiceCoordinator {
         interrupted: false,
         durationMs: Date.now() - startTime,
         terminatedSession: true,
+        telemetry: this.getTelemetry(),
       };
     }
 
@@ -447,7 +530,7 @@ export class AlinaVoiceCoordinator {
       let spoken = false;
       let interrupted = false;
 
-      // Text-to-Speech playback if enabled
+      // Natural Female TTS playback if enabled
       if (this.config.ttsEnabled && responseSummary && this.ttsAdapter.isAvailable()) {
         this.transitionState('speaking');
         this.transitionActivityState('speaking');
@@ -456,15 +539,13 @@ export class AlinaVoiceCoordinator {
         }
 
         try {
-          if ('speak' in this.ttsAdapter) {
-            await (this.ttsAdapter as any).speak(responseSummary, {
-              rate: this.config.voiceRate,
-              pitch: this.config.voicePitch,
-              volume: this.config.voiceVolume,
-              language: this.config.language,
-              voiceId: this.config.voiceId,
-            });
-          }
+          await this.ttsAdapter.speak(responseSummary, {
+            rate: this.config.voiceRate,
+            pitch: this.config.voicePitch,
+            volume: this.config.voiceVolume,
+            language: this.config.language,
+            voiceId: this.config.voiceId,
+          });
           spoken = true;
         } catch {
           spoken = false;
@@ -485,6 +566,8 @@ export class AlinaVoiceCoordinator {
         this.resumeWakeWordIfNeeded();
       }
 
+      this.emitTelemetry();
+
       return {
         transcript: goal,
         responseSummary,
@@ -492,6 +575,7 @@ export class AlinaVoiceCoordinator {
         interrupted,
         durationMs: Date.now() - startTime,
         taskId,
+        telemetry: this.getTelemetry(),
       };
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
@@ -508,6 +592,7 @@ export class AlinaVoiceCoordinator {
         durationMs: Date.now() - startTime,
         taskId,
         error: errorMsg,
+        telemetry: this.getTelemetry(),
       };
     }
   }
@@ -516,29 +601,52 @@ export class AlinaVoiceCoordinator {
     this.clearInactivityTimers();
     if (this.unsubscribeSttTranscript) this.unsubscribeSttTranscript();
     if (this.unsubscribeSttError) this.unsubscribeSttError();
-    this.wakeWordDetector?.stop();
-    this.ttsAdapter.stop();
-    this.sttAdapter.abort();
-    this.speechCoordinator.reset('idle');
+    if (this.unsubscribeWakeDetected) this.unsubscribeWakeDetected();
+    this.wakeWordDetector?.cleanup?.();
+    this.sttAdapter.cleanup?.();
+    this.ttsAdapter.cleanup?.();
+    this.speechCoordinator.cleanup();
+    this.telemetry.reset();
   }
 
   private setupListeners(): void {
     this.speechCoordinator.setActivityStateListener((activityState) => {
       this.transitionActivityState(activityState);
+      if (activityState === 'silence') {
+        this.telemetry.recordSilenceOnset();
+      }
     });
 
+    if (this.wakeWordDetector) {
+      this.unsubscribeWakeDetected = this.wakeWordDetector.onDetected((event) => {
+        this.handleWakeWordTriggered(event);
+      });
+    }
+
     this.unsubscribeSttTranscript = this.sttAdapter.onTranscript((transcript) => {
+      // Barge-in check: if ALINA is speaking when user speech arrives, halt TTS immediately
+      if (this.currentState === 'speaking' || this.ttsAdapter.isSpeaking()) {
+        this.ttsAdapter.stop();
+        this.telemetry.recordInterruption();
+        this.transitionState('interrupted');
+      }
+
       // User speech activity detected: reset inactivity timers
       this.clearInactivityTimers();
+
+      if (!transcript.isFinal) {
+        this.telemetry.recordInterimTranscript();
+      }
 
       this.speechCoordinator.handleTranscriptEvent(
         transcript,
         (quality) => {
           this.currentTranscript = quality.normalizedInput;
+          this.telemetry.recordFinalTranscript();
           if (this.events?.onTranscriptQuality) {
             this.events.onTranscriptQuality(quality);
           }
-          if (this.config.autoSubmitOnSilence && this.currentState === 'listening') {
+          if (this.config.autoSubmitOnSilence && (this.currentState === 'listening' || this.currentState === 'interrupted')) {
             const goal = quality.normalizedInput.trim();
             if (goal) {
               void this.submitVoiceCommand(goal);
@@ -560,12 +668,15 @@ export class AlinaVoiceCoordinator {
     });
 
     this.unsubscribeSttError = this.sttAdapter.onError((reason, message) => {
+      this.telemetry.recordRecognitionError(reason);
       this.handleError(reason, message);
     });
   }
 
   private handleWakeWordTriggered(event: WakeWordEvent): void {
     if (this.currentMode === 'conversation_mode' && this.currentState !== 'idle') return;
+
+    this.telemetry.recordWakeWordDetection();
 
     if (this.events?.onWakeWordDetected) {
       this.events.onWakeWordDetected(event);
@@ -574,7 +685,7 @@ export class AlinaVoiceCoordinator {
     // WAKE MODE -> CONVERSATION MODE transition
     this.startConversationSession();
 
-    // Check if user spoke "Hey Alina, <command>" in one continuous breath
+    // Check if user spoke "Hey Alina, <command>" in one continuous utterance
     const parsed = extractCommandAfterWakeWord(event.detectedPhrase, this.config.wakeWordPhrase);
     if (parsed.isWake && parsed.command) {
       void this.submitVoiceCommand(parsed.command);
@@ -614,15 +725,13 @@ export class AlinaVoiceCoordinator {
     }
 
     if (this.config.ttsEnabled && this.ttsAdapter.isAvailable()) {
-      if ('speak' in this.ttsAdapter) {
-        void (this.ttsAdapter as any).speak(promptText, {
-          rate: this.config.voiceRate,
-          pitch: this.config.voicePitch,
-          volume: this.config.voiceVolume,
-          language: this.config.language,
-          voiceId: this.config.voiceId,
-        });
-      }
+      void this.ttsAdapter.speak(promptText, {
+        rate: this.config.voiceRate,
+        pitch: this.config.voicePitch,
+        volume: this.config.voiceVolume,
+        language: this.config.language,
+        voiceId: this.config.voiceId,
+      });
     }
 
     this.inactivityCloseTimer = setTimeout(() => {
@@ -663,17 +772,24 @@ export class AlinaVoiceCoordinator {
     }
   }
 
+  private emitTelemetry(): void {
+    if (this.events?.onTelemetryUpdate) {
+      this.events.onTelemetryUpdate(this.getTelemetry());
+    }
+  }
+
   private handleError(reason: VoiceErrorReason, message: string): void {
     this.transitionState('error');
     this.transitionActivityState('error');
     if (this.events?.onError) {
       this.events.onError(reason, message);
     }
-    // Graceful fallback to text
     if (this.events?.onFallbackToText) {
       const partial = this.currentTranscript || this.currentInterimText;
       this.events.onFallbackToText(partial);
     }
+    this.emitTelemetry();
+
     setTimeout(() => {
       if (this.currentState === 'error') {
         if (this.currentMode === 'conversation_mode') {

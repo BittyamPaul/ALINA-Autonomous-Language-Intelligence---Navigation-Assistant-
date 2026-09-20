@@ -48,23 +48,77 @@ export function normalizeSpeechTranscript(rawText: string): { normalized: string
 
 export const applyPhoneticNormalization = normalizeSpeechTranscript;
 
+/**
+ * Safely merges streaming partial transcript chunks while eliminating word/phrase duplication.
+ * Solves common speech-recognition streaming artifacts where interim and final results
+ * overlap or re-emit the trailing suffix.
+ * 
+ * Example 1: existing "open the backend", incoming "open the backend folder" -> "open the backend folder"
+ * Example 2: existing "open my project", incoming "project and run tests" -> "open my project and run tests"
+ * Example 3: existing "create a new", incoming "new file" -> "create a new file"
+ */
+export function mergeTranscriptSegmentsSafely(existing: string, incoming: string): string {
+  const eClean = existing.trim();
+  const iClean = incoming.trim();
+
+  if (!eClean) return iClean;
+  if (!iClean) return eClean;
+
+  const eLower = eClean.toLowerCase();
+  const iLower = iClean.toLowerCase();
+
+  // 1. Direct duplicate
+  if (eLower === iLower) {
+    return eClean;
+  }
+
+  // 2. Incoming subsumes existing (common when interim accumulates from beginning)
+  if (iLower.startsWith(eLower)) {
+    return iClean;
+  }
+
+  // 3. Existing already ends with incoming
+  if (eLower.endsWith(iLower)) {
+    return eClean;
+  }
+
+  // 4. Token-level suffix-to-prefix overlap detection
+  const eWords = eClean.split(/\s+/);
+  const iWords = iClean.split(/\s+/);
+  const maxOverlap = Math.min(eWords.length, iWords.length);
+
+  for (let k = maxOverlap; k > 0; k--) {
+    const eSuffix = eWords.slice(eWords.length - k).map((w) => w.toLowerCase()).join(' ');
+    const iPrefix = iWords.slice(0, k).map((w) => w.toLowerCase()).join(' ');
+
+    if (eSuffix === iPrefix) {
+      // Suffix of existing matches prefix of incoming: merge seamlessly
+      const mergedWords = [...eWords, ...iWords.slice(k)];
+      return mergedWords.join(' ');
+    }
+  }
+
+  // 5. No overlap: append with single space
+  return `${eClean} ${iClean}`;
+}
 
 /**
  * EnhancedSpeechRecognitionCoordinator
  * 
- * Manages reliable, multi-clause speech transcription with:
+ * Manages multi-clause speech transcription with:
  * - Silence endpoint detection (prevents premature cutoffs on natural pauses)
+ * - Safe partial-result merging and overlap deduplication
  * - Fine-grained VAD state tracking: user_speaking -> silence -> end_of_utterance
- * - Partial-result accumulation buffer across continuous recognition turns
- * - Phonetic disambiguation for technical terms & Indian English / Hinglish
- * - Multi-tier transcript debug records (RAW, FINAL, NORMALIZED)
+ * - Configurable language/locale support
+ * - Clean resource disposal
  */
 export class EnhancedSpeechRecognitionCoordinator {
   private rawBuffer = '';
   private interimBuffer = '';
-  private silenceTimer: any = null;
+  private silenceTimer: ReturnType<typeof setTimeout> | null = null;
   private silenceTimeoutMs = 1500;
   private debugMode = false;
+  private language = 'en-US';
   private currentActivityState: VoiceActivityState = 'idle';
   private lastQualityRecord?: TranscriptQualityTier;
   private onActivityStateChange?: (state: VoiceActivityState) => void;
@@ -72,6 +126,7 @@ export class EnhancedSpeechRecognitionCoordinator {
   constructor(options?: {
     silenceTimeoutMs?: number;
     debugMode?: boolean;
+    language?: string;
     onActivityStateChange?: (state: VoiceActivityState) => void;
   }) {
     if (options?.silenceTimeoutMs) {
@@ -79,6 +134,9 @@ export class EnhancedSpeechRecognitionCoordinator {
     }
     if (options?.debugMode) {
       this.debugMode = options.debugMode;
+    }
+    if (options?.language) {
+      this.language = options.language;
     }
     this.onActivityStateChange = options?.onActivityStateChange;
   }
@@ -104,6 +162,18 @@ export class EnhancedSpeechRecognitionCoordinator {
     this.silenceTimeoutMs = timeoutMs;
   }
 
+  public getSilenceTimeout(): number {
+    return this.silenceTimeoutMs;
+  }
+
+  public setLanguage(language: string): void {
+    this.language = language;
+  }
+
+  public getLanguage(): string {
+    return this.language;
+  }
+
   public setDebugMode(enabled: boolean): void {
     this.debugMode = enabled;
   }
@@ -116,8 +186,16 @@ export class EnhancedSpeechRecognitionCoordinator {
     return this.lastQualityRecord;
   }
 
+  public getRawBuffer(): string {
+    return this.rawBuffer;
+  }
+
+  public getInterimBuffer(): string {
+    return this.interimBuffer;
+  }
+
   /**
-   * Resets internal accumulation buffers and resets activity state to listening/idle.
+   * Resets internal accumulation buffers and sets activity state.
    */
   public reset(nextState: VoiceActivityState = 'listening'): void {
     this.clearSilenceTimer();
@@ -142,23 +220,19 @@ export class EnhancedSpeechRecognitionCoordinator {
 
     if (event.isFinal) {
       if (event.text.trim()) {
-        if (this.rawBuffer) {
-          this.rawBuffer += ' ' + event.text.trim();
-        } else {
-          this.rawBuffer = event.text.trim();
-        }
+        this.rawBuffer = mergeTranscriptSegmentsSafely(this.rawBuffer, event.text);
       }
       this.interimBuffer = '';
     } else {
       this.interimBuffer = event.interimText || event.text;
     }
 
-    const currentCombined = (this.rawBuffer + (this.interimBuffer ? ' ' + this.interimBuffer : '')).trim();
+    const currentCombined = mergeTranscriptSegmentsSafely(this.rawBuffer, this.interimBuffer);
     if (onInterimUpdate) {
       onInterimUpdate(currentCombined);
     }
 
-    // Enter short silence state while timer is running
+    // Enter short silence state while timer is running after finalized segment
     if (this.rawBuffer.trim()) {
       this.setActivityState('silence');
       this.silenceTimer = setTimeout(() => {
@@ -174,8 +248,9 @@ export class EnhancedSpeechRecognitionCoordinator {
   public finalize(onFinalized: (quality: TranscriptQualityTier) => void): void {
     this.clearSilenceTimer();
 
-    const raw = (this.rawBuffer + (this.interimBuffer ? ' ' + this.interimBuffer : '')).trim();
+    const raw = mergeTranscriptSegmentsSafely(this.rawBuffer, this.interimBuffer).trim();
     if (!raw) {
+      this.setActivityState('idle');
       return;
     }
 
@@ -195,6 +270,13 @@ export class EnhancedSpeechRecognitionCoordinator {
     onFinalized(record);
   }
 
+  public cleanup(): void {
+    this.clearSilenceTimer();
+    this.rawBuffer = '';
+    this.interimBuffer = '';
+    this.setActivityState('idle');
+  }
+
   private clearSilenceTimer(): void {
     if (this.silenceTimer) {
       clearTimeout(this.silenceTimer);
@@ -202,4 +284,3 @@ export class EnhancedSpeechRecognitionCoordinator {
     }
   }
 }
-
