@@ -25,6 +25,11 @@ import type {
   ToolCallEntity,
 } from '@alina/database';
 import type { RiskLevel } from '@alina/tools';
+import type {
+  KnowledgeItem,
+  KnowledgeSource,
+  KnowledgeTopic,
+} from '@alina/shared';
 
 export class AlinaApiClient {
   private baseUrl: string;
@@ -255,6 +260,51 @@ export class AlinaApiClient {
         body: JSON.stringify(patch),
       }),
   };
+
+  // Knowledge Acquisition & Persistence
+  public readonly knowledge = {
+    list: (params?: { q?: string; topic?: string; projectId?: string; limit?: number }) => {
+      const sp = new URLSearchParams();
+      if (params?.q) sp.set('q', params.q);
+      if (params?.topic) sp.set('topic', params.topic);
+      if (params?.projectId) sp.set('projectId', params.projectId);
+      if (params?.limit) sp.set('limit', String(params.limit));
+      const qs = sp.toString() ? `?${sp.toString()}` : '';
+      return this.request<KnowledgeItem[]>(`/api/knowledge/items${qs}`);
+    },
+    acquire: (data: {
+      url: string;
+      title: string;
+      goal?: string;
+      rawContent?: string;
+      topic?: string;
+      projectId?: string;
+      taskId?: string;
+      refreshPolicyType?: string;
+      intervalDays?: number;
+    }) =>
+      this.request<{
+        item: KnowledgeItem;
+        source: KnowledgeSource;
+        topic: KnowledgeTopic;
+        isDuplicate: boolean;
+      }>('/api/knowledge/items', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    explain: <T = Record<string, unknown>>(type: 'project' | 'recommendation' | 'provenance', targetId: string) => {
+      return this.request<T>(
+        `/api/knowledge/explain?type=${encodeURIComponent(type)}&targetId=${encodeURIComponent(targetId)}`
+      );
+    },
+    refresh: (data: { itemId?: string; refreshAllStale?: boolean; rawContent?: string }) =>
+      this.request<{ refreshedCount?: number; items?: KnowledgeItem[]; status?: string }>('/api/knowledge/refresh', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+  };
 }
 
 export const alinaApi = new AlinaApiClient();
+
+

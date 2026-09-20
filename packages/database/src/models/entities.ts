@@ -367,3 +367,154 @@ export const AuditEventSchema = z.object({
   timestamp: z.string().datetime().default(() => new Date().toISOString()),
 });
 export type AuditEventEntity = z.infer<typeof AuditEventSchema>;
+
+// 16. Knowledge Source Entity
+export const KnowledgeSourceCategorySchema = z.enum([
+  'official_docs',
+  'technical_blog',
+  'academic_paper',
+  'pricing_page',
+  'community_forum',
+  'general_web',
+]);
+export type KnowledgeSourceCategory = z.infer<typeof KnowledgeSourceCategorySchema>;
+
+export const KnowledgeSourceSchema = z.object({
+  id: z.string(),
+  url: z.string().url(),
+  domain: z.string().min(1),
+  title: z.string().min(1),
+  authorOrOrg: z.string().optional(),
+  reliabilityScore: z.number().min(0).max(1).default(0.8),
+  lastFetchedAt: z.string().datetime().default(() => new Date().toISOString()),
+  httpStatus: z.number().int().default(200),
+  category: KnowledgeSourceCategorySchema.default('official_docs'),
+  createdAt: z.string().datetime().default(() => new Date().toISOString()),
+});
+export type KnowledgeSourceEntity = z.infer<typeof KnowledgeSourceSchema>;
+
+// 17. Knowledge Item Entity (Persistent Reusable Knowledge)
+export const KnowledgeRefreshPolicyTypeSchema = z.enum([
+  'software_documentation',
+  'current_pricing',
+  'stable_technical_concept',
+  'custom',
+  'manual_only',
+]);
+export type KnowledgeRefreshPolicyType = z.infer<typeof KnowledgeRefreshPolicyTypeSchema>;
+
+export const KnowledgeRefreshPolicySchema = z.object({
+  type: KnowledgeRefreshPolicyTypeSchema.default('software_documentation'),
+  intervalDays: z.number().int().positive().default(60),
+  reviewDate: z.string().datetime().nullable().optional(),
+  autoRefresh: z.boolean().default(true),
+});
+export type KnowledgeRefreshPolicy = z.infer<typeof KnowledgeRefreshPolicySchema>;
+
+export const KnowledgeItemStatusSchema = z.enum([
+  'active',
+  'stale',
+  'expired',
+  'refreshing',
+]);
+export type KnowledgeItemStatus = z.infer<typeof KnowledgeItemStatusSchema>;
+
+export const KnowledgeItemSchema = z.object({
+  id: z.string(),
+  topicId: z.string().optional(),
+  topic: z.string().min(1),
+  title: z.string().min(1),
+  sourceUrl: z.string().url(),
+  sourceDomain: z.string().min(1),
+  summary: z.string().min(1),
+  content: z.string().optional(),
+  confidence: z.number().min(0).max(1).default(0.85),
+  retrievedAt: z.string().datetime().default(() => new Date().toISOString()),
+  expiresAt: z.string().datetime().nullable().optional(),
+  reviewDate: z.string().datetime().nullable().optional(),
+  refreshPolicy: KnowledgeRefreshPolicySchema.default({
+    type: 'software_documentation',
+    intervalDays: 60,
+    autoRefresh: true,
+  }),
+  refreshCount: z.number().int().nonnegative().default(0),
+  lastRefreshedAt: z.string().datetime().default(() => new Date().toISOString()),
+  status: KnowledgeItemStatusSchema.default('active'),
+  tags: z.array(z.string()).default([]),
+  embedding: z.array(z.number()).optional(),
+  projectId: z.string().optional(),
+  taskId: z.string().optional(),
+  metadata: NoSecretsSchema.default({}),
+  createdAt: z.string().datetime().default(() => new Date().toISOString()),
+  updatedAt: z.string().datetime().default(() => new Date().toISOString()),
+});
+export type KnowledgeItemEntity = z.infer<typeof KnowledgeItemSchema>;
+
+// 18. Knowledge Topic Entity
+export const KnowledgeTopicSchema = z.object({
+  id: z.string(),
+  name: z.string().min(1),
+  slug: z.string().min(1),
+  description: z.string().optional(),
+  parentTopicId: z.string().optional(),
+  itemCount: z.number().int().nonnegative().default(0),
+  createdAt: z.string().datetime().default(() => new Date().toISOString()),
+  updatedAt: z.string().datetime().default(() => new Date().toISOString()),
+});
+export type KnowledgeTopicEntity = z.infer<typeof KnowledgeTopicSchema>;
+
+// 19. Knowledge Embedding Entity
+export const KnowledgeEmbeddingSchema = z.object({
+  id: z.string(),
+  itemId: z.string(),
+  chunkIndex: z.number().int().nonnegative().default(0),
+  text: z.string().min(1),
+  embedding: z.array(z.number()),
+  createdAt: z.string().datetime().default(() => new Date().toISOString()),
+});
+export type KnowledgeEmbeddingEntity = z.infer<typeof KnowledgeEmbeddingSchema>;
+
+// 20. Knowledge Update Log Entity
+export const KnowledgeUpdateTypeSchema = z.enum([
+  'created',
+  'refreshed',
+  'invalidated',
+  'confidence_adjusted',
+  'promoted_from_working',
+]);
+export type KnowledgeUpdateType = z.infer<typeof KnowledgeUpdateTypeSchema>;
+
+export const KnowledgeUpdateSchema = z.object({
+  id: z.string(),
+  itemId: z.string(),
+  updateType: KnowledgeUpdateTypeSchema.default('created'),
+  previousValues: z.record(z.unknown()).optional(),
+  newValues: z.record(z.unknown()).optional(),
+  reason: z.string().optional(),
+  updatedBy: z.string().default('alina_knowledge_service'),
+  timestamp: z.string().datetime().default(() => new Date().toISOString()),
+});
+export type KnowledgeUpdateEntity = z.infer<typeof KnowledgeUpdateSchema>;
+
+// 21. Ephemeral Working Knowledge Entity (Task-scoped)
+export const WorkingKnowledgeItemSchema = z.object({
+  id: z.string(),
+  taskId: z.string(),
+  title: z.string(),
+  url: z.string(),
+  domain: z.string(),
+  snippet: z.string(),
+  relevanceScore: z.number().min(0).max(1).default(0.8),
+  extractedAt: z.string().datetime().default(() => new Date().toISOString()),
+});
+export type WorkingKnowledgeItemEntity = z.infer<typeof WorkingKnowledgeItemSchema>;
+
+export const WorkingKnowledgeContextSchema = z.object({
+  taskId: z.string(),
+  goal: z.string(),
+  sources: z.array(z.object({ title: z.string(), url: z.string(), domain: z.string() })).default([]),
+  candidateFacts: z.array(WorkingKnowledgeItemSchema).default([]),
+  createdAt: z.string().datetime().default(() => new Date().toISOString()),
+});
+export type WorkingKnowledgeContextEntity = z.infer<typeof WorkingKnowledgeContextSchema>;
+

@@ -30,7 +30,10 @@ import { alinaApi } from '@/lib/api-client';
 import { NativeDesktopPanel } from '@/components/NativeDesktopPanel';
 import { ThingsAlinaRemembers } from '@/components/ThingsAlinaRemembers';
 import { DeveloperObservabilityPanel } from '@/components/DeveloperObservabilityPanel';
+import { KnowledgeExplorer } from '@/components/KnowledgeExplorer';
+import { SourceCitationBadge } from '@/components/SourceCitationBadge';
 import { useVoiceInteraction } from '@/hooks/useVoiceInteraction';
+
 
 interface MockTask {
   id: string;
@@ -58,6 +61,8 @@ export default function AlinaHomePage() {
   const [approvalDialogOpen, setApprovalDialogOpen] = useState(false);
   const [toasts, setToasts] = useState<ToastProps[]>([]);
   const [errorBannerVisible, setErrorBannerVisible] = useState(false);
+  const [memoryTierTab, setMemoryTierTab] = useState<'personal' | 'persistent'>('personal');
+
 
   // Sync theme with <html> class list
   useEffect(() => {
@@ -790,6 +795,36 @@ export default function AlinaHomePage() {
                 }}
                 postConditionVerified={true}
               />
+              <ToolExecutionCard
+                toolName="knowledge_web_acquisition"
+                riskLevel="READ_ONLY"
+                status="success"
+                durationMs={142}
+                parameters={{
+                  query: 'React 19 Server Actions specification',
+                  policy: 'software_documentation',
+                }}
+                output={{
+                  status: 'acquired',
+                  confidence: 0.98,
+                  sourceDomain: 'react.dev',
+                  refreshPolicy: 'periodic (60d)',
+                }}
+                postConditionVerified={true}
+              />
+              <div className="pt-1">
+                <SourceCitationBadge
+                  url="https://react.dev/blog/2024/12/05/react-19"
+                  title="React 19 Official Release Notes"
+                  domain="react.dev"
+                  confidence={0.98}
+                  retrievedAt={new Date().toISOString()}
+                  onClick={() => {
+                    setActiveNav('memory');
+                    setMemoryTierTab('persistent');
+                  }}
+                />
+              </div>
             </div>
           }
           memorySection={
@@ -885,10 +920,43 @@ export default function AlinaHomePage() {
         </div>
       )}
 
-      {/* Dedicated "Things Alina remembers" View */}
+      {/* Dedicated Memory & Knowledge View (3-Tier Decoupled Architecture) */}
       {activeNav === 'memory' && (
         <div className="max-w-4xl mx-auto px-6 py-8 space-y-6 select-none">
-          <ThingsAlinaRemembers onToast={addToast} />
+          {/* Layer Tab Switcher */}
+          <div className="flex items-center justify-between border-b border-stone-200/80 dark:border-stone-800/80 pb-3">
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={() => setMemoryTierTab('personal')}
+                className={`text-xs font-mono px-3.5 py-1.5 rounded-lg transition-all flex items-center space-x-2 ${
+                  memoryTierTab === 'personal'
+                    ? 'bg-stone-900 text-stone-100 dark:bg-stone-100 dark:text-stone-900 font-semibold shadow-xs'
+                    : 'text-stone-500 hover:text-stone-800 dark:hover:text-stone-200'
+                }`}
+              >
+                <span>Layer 1: Personal Memory</span>
+              </button>
+              <button
+                onClick={() => setMemoryTierTab('persistent')}
+                className={`text-xs font-mono px-3.5 py-1.5 rounded-lg transition-all flex items-center space-x-2 ${
+                  memoryTierTab === 'persistent'
+                    ? 'bg-amber-600 text-white dark:bg-amber-500 dark:text-stone-950 font-semibold shadow-xs'
+                    : 'text-stone-500 hover:text-stone-800 dark:hover:text-stone-200'
+                }`}
+              >
+                <span>Layer 3: Persistent Knowledge Base</span>
+              </button>
+            </div>
+            <div className="hidden sm:flex items-center text-[11px] font-mono text-stone-400">
+              Strict Decoupling: Web Research ≠ Personal Memory
+            </div>
+          </div>
+
+          {memoryTierTab === 'personal' ? (
+            <ThingsAlinaRemembers onToast={addToast} />
+          ) : (
+            <KnowledgeExplorer onToast={addToast} />
+          )}
         </div>
       )}
 

@@ -20,8 +20,19 @@ DEFINE TABLE file_reference SCHEMALESS;
 DEFINE TABLE browser_session SCHEMALESS;
 DEFINE TABLE audit_event SCHEMALESS;
 
+-- Knowledge Acquisition System Tables (3-Layer Architecture)
+DEFINE TABLE knowledge_items SCHEMALESS;
+DEFINE TABLE knowledge_sources SCHEMALESS;
+DEFINE TABLE knowledge_topics SCHEMALESS;
+DEFINE TABLE knowledge_embeddings SCHEMALESS;
+DEFINE TABLE knowledge_updates SCHEMALESS;
+
 -- Vector Index on Memory (Cosine Distance)
 DEFINE INDEX idx_memory_embedding ON TABLE memory 
+  FIELDS embedding HNSW DIMENSION 384 DISTANCE COSINE;
+
+-- Vector Index on Knowledge Items (Cosine Distance)
+DEFINE INDEX idx_knowledge_embedding ON TABLE knowledge_items 
   FIELDS embedding HNSW DIMENSION 384 DISTANCE COSINE;
 
 -- Graph Relations
@@ -37,3 +48,11 @@ DEFINE TABLE requires SCHEMALESS TYPE RELATION FROM task TO approval;
 DEFINE TABLE remembers SCHEMALESS TYPE RELATION FROM user TO memory;
 DEFINE TABLE produced SCHEMALESS TYPE RELATION FROM task TO file_reference;
 DEFINE TABLE contains_file SCHEMALESS TYPE RELATION FROM workspace TO file_reference;
+
+-- Knowledge Graph Relations
+DEFINE TABLE has_source SCHEMALESS TYPE RELATION FROM knowledge_topics TO knowledge_sources;
+DEFINE TABLE produced_item SCHEMALESS TYPE RELATION FROM knowledge_sources TO knowledge_items;
+DEFINE TABLE relates_to_project SCHEMALESS TYPE RELATION FROM knowledge_items TO workspace;
+DEFINE TABLE referenced_by_task SCHEMALESS TYPE RELATION FROM knowledge_items TO task;
+DEFINE TABLE used_knowledge SCHEMALESS TYPE RELATION FROM task TO knowledge_items;
+

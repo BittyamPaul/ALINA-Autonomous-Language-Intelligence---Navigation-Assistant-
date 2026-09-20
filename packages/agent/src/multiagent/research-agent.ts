@@ -5,12 +5,14 @@ import {
 } from '@alina/shared';
 import { BaseSpecializedAgent } from './base-specialized-agent';
 import { ModelAdapter } from '../model-abstraction';
+import { KnowledgeService } from '../services/knowledge-service';
 
 export interface ResearchAgentContext {
   topic?: string;
   sources?: Array<{ title: string; url: string; snippet?: string; content?: string }>;
   rawContent?: string;
   focusAreas?: string[];
+  projectId?: string;
 }
 
 export interface ResearchSynthesisResult {
@@ -30,18 +32,25 @@ export interface ResearchSynthesisResult {
  * - Extraction of high-signal facts, technical diffs, and changelogs
  * - Source citation with verifiable URLs
  * - Confidence scoring and executive summary creation
+ * - Integration with KnowledgeService (Working Knowledge & Persistent Knowledge Base)
  */
 export class AlinaResearchAgent extends BaseSpecializedAgent {
   public readonly agentType: AgentType = 'research';
   private modelAdapter?: ModelAdapter;
+  private knowledgeService?: KnowledgeService;
 
-  constructor(options?: { modelAdapter?: ModelAdapter }) {
+  constructor(options?: { modelAdapter?: ModelAdapter; knowledgeService?: KnowledgeService }) {
     super();
     this.modelAdapter = options?.modelAdapter;
+    this.knowledgeService = options?.knowledgeService;
   }
 
   public getModelAdapter(): ModelAdapter | undefined {
     return this.modelAdapter;
+  }
+
+  public getKnowledgeService(): KnowledgeService | undefined {
+    return this.knowledgeService;
   }
 
   public async execute(request: DelegationRequest): Promise<StructuredTaskResult> {
@@ -65,6 +74,33 @@ export class AlinaResearchAgent extends BaseSpecializedAgent {
       }
       stepsExecuted++;
 
+      // Populate Layer 2 (Working Knowledge) & Layer 3 (Persistent Knowledge Base) if service bound
+      if (this.knowledgeService) {
+        for (const src of synthesis.sources) {
+          // Layer 2: Record working knowledge fact
+          this.knowledgeService.addWorkingKnowledgeFact(request.taskId, {
+            title: src.title,
+            url: src.url,
+            snippet: src.snippet || synthesis.executiveSummary,
+          });
+
+          // Layer 3: Acquire into persistent knowledge base
+          try {
+            await this.knowledgeService.acquire({
+              goal: request.goal,
+              url: src.url,
+              title: src.title,
+              rawContent: src.snippet ? `${src.title}\n\n${src.snippet}\n\n${synthesis.executiveSummary}` : synthesis.executiveSummary,
+              topic: synthesis.topic,
+              taskId: request.taskId,
+              projectId: ctx.projectId,
+            });
+          } catch {
+            // Non-blocking for acquisition fallback
+          }
+        }
+      }
+
       return this.createSuccessResult(
         request,
         `Completed research synthesis on "${topic}" across ${synthesis.sources.length} sources with ${synthesis.keyFindings.length} key findings`,
@@ -82,6 +118,7 @@ export class AlinaResearchAgent extends BaseSpecializedAgent {
       );
     }
   }
+
 
   private extractTopic(goal: string): string {
     const cleaned = goal

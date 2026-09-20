@@ -4,3 +4,5 @@ export * from './task-repo';
 export * from './memory-repo';
 export * from './audit-repo';
 export * from './graph-repo';
+export * from './knowledge-repo';
+

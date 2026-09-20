@@ -14,6 +14,8 @@ export * from './memory/text-embedder';
 export * from './memory/memory-extractor';
 export * from './memory/privacy-sanitizer';
 export * from './security/authorization-manager';
+export * from './security/web-content-sanitizer';
+
 export * from './multiagent/base-specialized-agent';
 export * from './multiagent/filesystem-agent';
 export * from './multiagent/computer-agent';

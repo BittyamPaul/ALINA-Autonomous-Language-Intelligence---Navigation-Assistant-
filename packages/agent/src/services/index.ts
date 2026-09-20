@@ -7,3 +7,5 @@ export * from './tool-service';
 export * from './agent-run-service';
 export * from './audit-service';
 export * from './observability-service';
+export * from './knowledge-service';
+

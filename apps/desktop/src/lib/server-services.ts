@@ -9,6 +9,7 @@ import {
   ToolService,
   AgentRunService,
   AuditService,
+  KnowledgeService,
   AlinaSupervisorAgent,
   AuthorizationManager,
   AlinaObservabilityService,
@@ -28,6 +29,7 @@ let services: {
   tools: ToolService;
   agentRuns: AgentRunService;
   audit: AuditService;
+  knowledge: KnowledgeService;
 } | null = null;
 let supervisorAgent: AlinaSupervisorAgent | null = null;
 
@@ -51,6 +53,7 @@ export async function getServerServices() {
       tools: new ToolService(globalClient),
       agentRuns: new AgentRunService(globalClient),
       audit: new AuditService(globalClient),
+      knowledge: new KnowledgeService(globalClient),
     };
   }
 
