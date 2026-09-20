@@ -79,21 +79,46 @@ export class ApprovalService {
       createdAt: request.timestamp,
     };
 
+    try {
+      await this.taskRepo.createApprovalGate(entity);
+    } catch {
+      // Fallback if offline
+    }
+
     return entity;
   }
 
   public async listPending(taskId?: string): Promise<ApprovalEntity[]> {
     this.authManager.sweepExpired();
-    if (taskId) {
-      return this.taskRepo.getPendingApprovals(taskId);
+    const repoPending = taskId ? await this.taskRepo.getPendingApprovals(taskId) : [];
+    const authPending = this.authManager.getPendingRequests().filter((r: { taskId?: string }) => !taskId || r.taskId === taskId);
+
+    const combined = new Map<string, ApprovalEntity>();
+    for (const r of repoPending) {
+      combined.set(r.id, r);
     }
-    const all = await this.taskRepo.list(200);
-    const pendingList: ApprovalEntity[] = [];
-    for (const t of all) {
-      const p = await this.taskRepo.getPendingApprovals(t.id);
-      pendingList.push(...p);
+    for (const req of authPending) {
+      if (!combined.has(req.id)) {
+        combined.set(req.id, {
+          id: req.id,
+          taskId: req.taskId || taskId || 'default',
+          taskStepId: req.stepId,
+          action: req.action,
+          target: req.target,
+          source: req.source,
+          reason: req.reason,
+          tool: req.tool,
+          riskLevel: req.riskLevel,
+          description: req.reason,
+          parametersSummary: req.parametersSummary,
+          parameters: req.parameters,
+          status: 'pending',
+          expiresAt: req.expiresAt,
+          createdAt: req.timestamp,
+        });
+      }
     }
-    return pendingList;
+    return Array.from(combined.values());
   }
 
   public async getById(id: string): Promise<ApprovalEntity | undefined> {
@@ -133,6 +158,9 @@ export class ApprovalService {
 
     if (validated.decision === 'approved') {
       const { request, grant } = await this.authManager.approve(id, validated.decisionBy);
+      try {
+        await this.taskRepo.resolveApproval(id, 'approved', validated.decisionBy, undefined, grant.grantId);
+      } catch {}
       return {
         id: request.id,
         taskId: request.taskId || 'default',
