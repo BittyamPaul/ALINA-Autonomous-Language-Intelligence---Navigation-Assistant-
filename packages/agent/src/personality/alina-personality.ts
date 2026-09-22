@@ -1,4 +1,4 @@
-import { AlinaPersonalityConfig } from '@alina/shared';
+import { AlinaPersonalityConfig, PersonalContextModel } from '@alina/shared';
 
 /**
  * Default ALINA Personality Profile
@@ -74,6 +74,10 @@ export class AlinaConversationalPersona {
   public greet(recentProjectName?: string): string {
     if (this.personalContext?.communicationStyle.conciseness === 'concise') {
       return 'Ready.';
+    }
+    const proj = recentProjectName || this.personalContext?.projectContext.activeProject;
+    if (proj && this.config.conversationalFamiliarity === 'familiar') {
+      return `Good day. Ready on ${proj}.`;
     }
     return 'Good day. How may I assist you?';
   }

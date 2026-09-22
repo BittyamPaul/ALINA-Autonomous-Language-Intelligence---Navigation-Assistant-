@@ -52,46 +52,49 @@ export class PatternExtractor {
       const goal = ev.goal || (ev.payload?.goal as string) || '';
       const goalLower = goal.toLowerCase();
 
-      // 1. Tool Extraction
+      // 1. Tool Extraction (deduplicated per event)
       const rawTools: string[] = [];
-      if (Array.isArray(ev.toolsUsed)) {
+      if (Array.isArray(ev.toolsUsed) && ev.toolsUsed.length > 0) {
         rawTools.push(...ev.toolsUsed);
-      }
-      if (Array.isArray(ev.payload?.toolsUsed)) {
+      } else if (Array.isArray(ev.payload?.toolsUsed) && (ev.payload.toolsUsed as string[]).length > 0) {
         rawTools.push(...(ev.payload.toolsUsed as string[]));
-      }
-      const singleTool = (ev.payload?.toolName as string) || (ev.payload?.tool as string);
-      if (singleTool && !rawTools.includes(singleTool)) {
-        rawTools.push(singleTool);
+      } else {
+        const singleTool = (ev.payload?.toolName as string) || (ev.payload?.tool as string);
+        if (singleTool) {
+          rawTools.push(singleTool);
+        }
       }
 
-      // Check aliases in goal
-      const toolAliases = [
-        { name: 'VS Code', key: 'vscode', aliases: ['vscode', 'vs code', 'code .', 'visual studio code'] },
-        { name: 'Git', key: 'git', aliases: ['git status', 'git checkout', 'git commit', 'git diff', 'git'] },
-        { name: 'pnpm', key: 'pnpm', aliases: ['pnpm', 'pnpm test', 'pnpm build'] },
-        { name: 'Terminal', key: 'terminal', aliases: ['powershell', 'bash', 'terminal', 'shell'] },
-      ];
+      // Check aliases in goal ONLY if no tools were explicitly given
+      if (rawTools.length === 0) {
+        const toolAliases = [
+          { name: 'VS Code', key: 'vscode', aliases: ['vscode', 'vs code', 'code .', 'visual studio code'] },
+          { name: 'Git', key: 'git', aliases: ['git status', 'git checkout', 'git commit', 'git diff', 'git'] },
+          { name: 'pnpm', key: 'pnpm', aliases: ['pnpm', 'pnpm test', 'pnpm build'] },
+          { name: 'Terminal', key: 'terminal', aliases: ['powershell', 'bash', 'terminal', 'shell'] },
+        ];
 
-      for (const t of toolAliases) {
-        if (t.aliases.some((alias) => goalLower.includes(alias))) {
-          if (!rawTools.some((rt) => rt.toLowerCase() === t.key || rt.toLowerCase() === t.name.toLowerCase())) {
+        for (const t of toolAliases) {
+          if (t.aliases.some((alias) => goalLower.includes(alias))) {
             rawTools.push(t.name);
           }
         }
       }
 
+      const eventToolsSeen = new Set<string>();
       for (const raw of rawTools) {
         const lower = raw.toLowerCase();
         const isVsCode = lower === 'vscode' || lower === 'vs code' || lower === 'code .';
-        const displayName = isVsCode ? 'VS Code' : raw;
         const toolKey = isVsCode ? 'vscode' : lower;
 
-        if (!toolCounts[toolKey]) {
-          toolCounts[toolKey] = { count: 0, lastTime: time };
+        if (!eventToolsSeen.has(toolKey)) {
+          eventToolsSeen.add(toolKey);
+          if (!toolCounts[toolKey]) {
+            toolCounts[toolKey] = { count: 0, lastTime: time };
+          }
+          toolCounts[toolKey]!.count++;
+          toolCounts[toolKey]!.lastTime = time;
         }
-        toolCounts[toolKey].count++;
-        toolCounts[toolKey].lastTime = time;
       }
 
       // Sequence extraction
@@ -99,24 +102,32 @@ export class PatternExtractor {
         for (let i = 0; i < rawTools.length - 1; i++) {
           const a = rawTools[i];
           const b = rawTools[i + 1];
-          const seqKey = `${a} -> ${b}`;
-          if (!sequences[seqKey]) {
-            sequences[seqKey] = { sequence: [a, b], count: 0, lastTime: time };
+          if (a && b) {
+            const seqKey = `${a} -> ${b}`;
+            const existing = sequences[seqKey];
+            if (!existing) {
+              sequences[seqKey] = { sequence: [a, b], count: 1, lastTime: time };
+            } else {
+              existing.count++;
+              existing.lastTime = time;
+            }
           }
-          sequences[seqKey].count++;
-          sequences[seqKey].lastTime = time;
         }
       } else if (rawTools.length === 1) {
         const currentTool = rawTools[0];
-        if (lastTool && lastTool !== currentTool) {
+        if (currentTool && lastTool && lastTool !== currentTool) {
           const seqKey = `${lastTool} -> ${currentTool}`;
-          if (!sequences[seqKey]) {
-            sequences[seqKey] = { sequence: [lastTool, currentTool], count: 0, lastTime: time };
+          const existing = sequences[seqKey];
+          if (!existing) {
+            sequences[seqKey] = { sequence: [lastTool, currentTool], count: 1, lastTime: time };
+          } else {
+            existing.count++;
+            existing.lastTime = time;
           }
-          sequences[seqKey].count++;
-          sequences[seqKey].lastTime = time;
         }
-        lastTool = currentTool;
+        if (currentTool) {
+          lastTool = currentTool;
+        }
       }
 
       // 2. Project identification
@@ -145,11 +156,11 @@ export class PatternExtractor {
       const mod = ev.modality || (ev.payload?.modality as string);
       if (mod === 'voice' || ev.type === 'voice_turn') {
         voiceCount++;
-      } else {
+      } else if (ev.payload?.explicitModality && mod === 'text') {
         textCount++;
       }
 
-      // 4. Communication style tracking
+      // 4. Communication style tracking (only when explicitly observed)
       const styleObserved = ev.communicationStyleObserved || (ev.payload?.communicationStyleObserved as any);
       if (styleObserved) {
         if (styleObserved.conciseness === 'concise') {
@@ -157,10 +168,6 @@ export class PatternExtractor {
         } else if (styleObserved.conciseness === 'detailed') {
           detailedInquiries++;
         }
-      } else if (goal.length > 0 && goal.length < 50) {
-        conciseInquiries++;
-      } else if (goal.length >= 100) {
-        detailedInquiries++;
       }
     }
 
@@ -205,7 +212,7 @@ export class PatternExtractor {
       });
     }
 
-    // Communication Style Patterns
+    // Communication Style Patterns (only when observed >= 1)
     if (conciseInquiries >= 1) {
       patterns.push({
         dimension: 'communication_style',
@@ -236,8 +243,8 @@ export class PatternExtractor {
       });
     }
 
-    // Interaction Preference Patterns
-    if (voiceCount >= 1 && voiceCount >= textCount) {
+    // Interaction Preference Patterns (only when voice >= 1)
+    if (voiceCount >= 1) {
       patterns.push({
         dimension: 'interaction_preferences',
         patternKey: 'modality:voice',

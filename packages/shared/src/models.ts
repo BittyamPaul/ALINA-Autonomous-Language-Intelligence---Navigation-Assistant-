@@ -891,6 +891,7 @@ export type PersonalContextModel = z.infer<typeof PersonalContextModelSchema>;
 
 export const InteractionEventSchema = z.object({
   id: z.string(),
+  taskId: z.string().optional(),
   timestamp: z.string().default(() => new Date().toISOString()),
   type: z.enum(['task_execution', 'user_message', 'tool_invocation', 'ui_interaction', 'voice_turn']).default('task_execution'),
   goal: z.string().optional(),
@@ -900,6 +901,7 @@ export const InteractionEventSchema = z.object({
   communicationStyleObserved: CommunicationStylePreferenceSchema.partial().optional(),
   projectId: z.string().optional(),
   technologies: z.array(z.string()).optional(),
+  durationMs: z.number().optional(),
   payload: z.record(z.unknown()).default({}),
   metadata: z.object({
     workspaceId: z.string().optional(),

@@ -125,6 +125,7 @@ export class AlinaPersonalAdaptationEngine {
       | (Omit<InteractionEvent, 'id' | 'timestamp'> & { id?: string; timestamp?: string })
       | {
           id?: string;
+          taskId?: string;
           timestamp?: string;
           goal?: string;
           toolsUsed?: string[];
@@ -144,6 +145,7 @@ export class AlinaPersonalAdaptationEngine {
 
     const event: InteractionEvent = {
       id: eventInput.id || `ev_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      taskId: (eventInput as any).taskId,
       timestamp: eventInput.timestamp || new Date().toISOString(),
       type: eventInput.type || (eventInput.modality === 'voice' ? 'voice_turn' : 'task_execution'),
       goal: (eventInput as any).goal,

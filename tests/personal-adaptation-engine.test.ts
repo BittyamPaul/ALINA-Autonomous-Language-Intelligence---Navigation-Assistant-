@@ -3,14 +3,15 @@ import { AlinaDatabaseClient } from '@alina/database';
 import {
   MemoryService,
   AlinaPersonalAdaptationEngine,
-  PatternExtractor,
-  ConfidenceAssessor,
   AlinaConversationalPersona,
   AlinaSupervisorAgent,
+  MockModelAdapter,
+  SafeWorkspaceInspectorTool,
 } from '@alina/agent';
+import { ToolRegistry } from '@alina/tools';
 import {
   PersonalContextModel,
-  InteractionEvent,
+  PersonalContextModelSchema,
 } from '@alina/shared';
 
 describe('ALINA Personal Adaptation Engine', () => {
@@ -76,7 +77,7 @@ describe('ALINA Personal Adaptation Engine', () => {
 
       // Confirmation proposal generated with natural wording
       expect(result.newProposals.length).toBe(1);
-      const proposal = result.newProposals[0];
+      const proposal = result.newProposals[0]!;
       expect(proposal.prompt).toBe("I've noticed you usually use VS Code for development. Should I remember that?");
       expect(proposal.options).toEqual(['Yes', 'No', 'Not now']);
       expect(proposal.status).toBe('pending');
@@ -94,7 +95,7 @@ describe('ALINA Personal Adaptation Engine', () => {
 
       const evalResult = await adaptationEngine.evaluateRecentInteractions();
       expect(evalResult.newProposals.length).toBe(1);
-      proposalId = evalResult.newProposals[0].id;
+      proposalId = evalResult.newProposals[0]!.id;
     });
 
     it('Option "Yes": updates personalContext.workPatterns and reinforces memory to EXPLICIT tier', async () => {
@@ -304,7 +305,7 @@ describe('ALINA Personal Adaptation Engine', () => {
       expect(evalResult.newProposals.length).toBe(1);
 
       // Check proposal text does not leak raw intelligence / internal scores
-      const proposal = evalResult.newProposals[0];
+      const proposal = evalResult.newProposals[0]!;
       expect(proposal.prompt).not.toMatch(/score|adaptation\s*score|intelligence|iq/i);
 
       // Accept proposal
@@ -319,7 +320,12 @@ describe('ALINA Personal Adaptation Engine', () => {
 
   describe('7. Integration with AlinaSupervisorAgent', () => {
     it('automatically records interaction telemetry upon supervisor task completion', async () => {
+      const toolRegistry = new ToolRegistry();
+      toolRegistry.register(SafeWorkspaceInspectorTool);
+
       const supervisor = new AlinaSupervisorAgent({
+        toolRegistry,
+        modelAdapter: new MockModelAdapter(),
         adaptationEngine,
       });
 
@@ -336,9 +342,9 @@ describe('ALINA Personal Adaptation Engine', () => {
       // The adaptation engine should now have 1 recorded interaction event
       const recentEvents = adaptationEngine.getRecentEvents();
       expect(recentEvents.length).toBe(1);
-      expect(recentEvents[0].goal).toBe('Quick status check');
-      expect(recentEvents[0].status).toBe('completed');
-      expect(recentEvents[0].modality).toBe('text');
+      expect(recentEvents[0]!.goal).toBe('Quick status check');
+      expect(recentEvents[0]!.status).toBe('completed');
+      expect(recentEvents[0]!.modality).toBe('text');
     });
   });
 
@@ -351,33 +357,19 @@ describe('ALINA Personal Adaptation Engine', () => {
       expect(defaultGreeting).toBe('Good day. How may I assist you?');
 
       // Update persona with concise personal context
-      persona.setPersonalContext({
-        communicationStyle: {
-          conciseness: 'concise',
-          formality: 'formal',
-          preferredStructure: 'editorial_summary',
-        },
-        workPatterns: {
-          frequentlyUsedProjects: [{ projectId: 'alina_core', usageCount: 15, lastUsed: new Date().toISOString() }],
-          frequentlyUsedTools: [],
-          recurringTaskSequences: [],
-          preferredWorkflows: [],
-        },
-        interactionPreferences: {
-          preferredModality: 'text',
-          preferredVoiceId: 'female_warm',
-          preferredUiMode: 'system',
-          preferredConfirmationBehavior: 'standard',
-        },
-        projectContext: {
-          frequentlyUsedProjects: [],
-          technologies: ['TypeScript'],
-          recurringGoals: [],
-          taskHistory: [],
-        },
-        internalAdaptationScore: 45,
-        updatedAt: new Date().toISOString(),
-      });
+      persona.setPersonalContext(
+        PersonalContextModelSchema.parse({
+          communicationStyle: {
+            conciseness: 'concise',
+            formality: 'formal',
+            preferredStructure: 'editorial_summary',
+          },
+          projectContext: {
+            activeProject: 'alina_core',
+          },
+          internalAdaptationScore: 45,
+        })
+      );
 
       const conciseGreeting = persona.greet();
       expect(conciseGreeting).toBe('Ready.');

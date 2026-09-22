@@ -1044,7 +1044,7 @@ export class AlinaSupervisorAgent {
     // Record interaction event for personal adaptation engine
     if (this.adaptationEngine) {
       try {
-        const toolsUsed = subagentResults.flatMap((r) => (r.toolCalls || []).map((tc) => tc.toolName));
+        const toolsUsed = subagentResults.map((r) => r.targetAgent);
         this.adaptationEngine.recordInteraction({
           taskId,
           goal: options.goal,
