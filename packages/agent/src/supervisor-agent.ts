@@ -29,6 +29,7 @@ import { AlinaComputerAgent } from './multiagent/computer-agent';
 import { AlinaResearchAgent, ResearchSynthesisResult } from './multiagent/research-agent';
 import { AlinaDocumentAgent, DocumentOutputData } from './multiagent/document-agent';
 import { AlinaBrowserAgent, BrowserSourceReference } from './browser-agent';
+import { AlinaPersonalAdaptationEngine } from './adaptation';
 
 export interface SupervisorExecutionOptions {
   taskId?: string;
@@ -42,6 +43,7 @@ export interface SupervisorExecutionOptions {
   authorizationGrant?: AuthorizationGrant;
   forceDirect?: boolean;
   forceDelegate?: boolean;
+  modality?: 'text' | 'voice';
   onProgress?: (event: AgentEventEnvelope) => void;
 }
 
@@ -92,6 +94,7 @@ export class AlinaSupervisorAgent {
   private browserAgent?: AlinaBrowserAgent;
   private cancelledTasks: Set<string> = new Set();
   private observabilityService: AlinaObservabilityService;
+  private adaptationEngine?: AlinaPersonalAdaptationEngine;
 
   constructor(options: {
     config?: Partial<AgentConfig>;
@@ -109,6 +112,7 @@ export class AlinaSupervisorAgent {
     researchAgent?: AlinaResearchAgent;
     documentAgent?: AlinaDocumentAgent;
     browserAgent?: AlinaBrowserAgent;
+    adaptationEngine?: AlinaPersonalAdaptationEngine;
   }) {
     this.config = { ...DEFAULT_AGENT_CONFIG, ...options.config };
     this.modelAdapter = options.modelAdapter ?? new MastraModelAdapter(this.config);
@@ -123,6 +127,7 @@ export class AlinaSupervisorAgent {
     this.agentRunService = options.agentRunService;
     this.memoryService = options.memoryService;
     this.authorizationManager = options.authorizationManager;
+    this.adaptationEngine = options.adaptationEngine;
 
     // Initialize specialized subagents and task delegator
     this.delegator = options.delegator || new TaskDelegator({
@@ -164,6 +169,10 @@ export class AlinaSupervisorAgent {
 
   public getDelegator(): TaskDelegator {
     return this.delegator;
+  }
+
+  public getAdaptationEngine(): AlinaPersonalAdaptationEngine | undefined {
+    return this.adaptationEngine;
   }
 
   public getSubagent(type: AgentType): BaseSpecializedAgent | undefined {
@@ -614,6 +623,23 @@ export class AlinaSupervisorAgent {
       }
     }
 
+    // Record interaction event for personal adaptation engine
+    if (this.adaptationEngine) {
+      try {
+        this.adaptationEngine.recordInteraction({
+          taskId,
+          goal: options.goal,
+          status: 'completed',
+          toolsUsed: stepOutputs.map((s) => s.toolName),
+          durationMs,
+          projectId: options.projectId,
+          modality: options.modality ?? 'text',
+        });
+      } catch {
+        // Non-blocking adaptation recording
+      }
+    }
+
     return {
       taskId,
       goal: options.goal,
@@ -1013,6 +1039,24 @@ export class AlinaSupervisorAgent {
           endedAt: new Date().toISOString(),
         });
       } catch {}
+    }
+
+    // Record interaction event for personal adaptation engine
+    if (this.adaptationEngine) {
+      try {
+        const toolsUsed = subagentResults.flatMap((r) => (r.toolCalls || []).map((tc) => tc.toolName));
+        this.adaptationEngine.recordInteraction({
+          taskId,
+          goal: options.goal,
+          status: 'completed',
+          toolsUsed,
+          durationMs: Date.now() - startTime,
+          projectId: options.projectId,
+          modality: options.modality ?? 'text',
+        });
+      } catch {
+        // Non-blocking adaptation recording
+      }
     }
 
     emitProgress(summary, 'task:completed');

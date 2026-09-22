@@ -796,3 +796,158 @@ export const KnowledgeRecommendationExplanationSchema = z.object({
   rationale: z.string(),
 });
 export type KnowledgeRecommendationExplanation = z.infer<typeof KnowledgeRecommendationExplanationSchema>;
+
+// ============================================================================
+// Personal Adaptation Engine & Personal Context Model
+// ============================================================================
+
+export const CommunicationStylePreferenceSchema = z.object({
+  conciseness: z.enum(['concise', 'balanced', 'detailed']).default('concise'),
+  formality: z.enum(['formal', 'casual']).default('casual'),
+  preferredStructure: z.enum(['bullet_points', 'editorial_summary', 'step_by_step', 'direct_answer']).default('editorial_summary'),
+  preferredResponseStructure: z.enum(['bullet_points', 'editorial_summary', 'step_by_step', 'direct_answer']).default('editorial_summary'),
+  lastUpdated: z.string().default(() => new Date().toISOString()),
+});
+export type CommunicationStylePreference = z.infer<typeof CommunicationStylePreferenceSchema>;
+
+export const ProjectUsageStatSchema = z.object({
+  projectName: z.string(),
+  projectPath: z.string().optional(),
+  frequency: z.number().default(1),
+  lastUsed: z.string().default(() => new Date().toISOString()),
+});
+export type ProjectUsageStat = z.infer<typeof ProjectUsageStatSchema>;
+
+export const ToolUsageStatSchema = z.object({
+  toolName: z.string(),
+  frequency: z.number().default(1),
+  userConfirmed: z.boolean().default(false),
+  lastUsed: z.string().default(() => new Date().toISOString()),
+});
+export type ToolUsageStat = z.infer<typeof ToolUsageStatSchema>;
+
+export const RecurringSequenceSchema = z.object({
+  sequence: z.array(z.string()),
+  frequency: z.number().default(1),
+  confidence: z.number().min(0).max(1).default(0.5),
+  lastUsed: z.string().default(() => new Date().toISOString()),
+});
+export type RecurringSequence = z.infer<typeof RecurringSequenceSchema>;
+
+export const WorkPatternsPreferenceSchema = z.object({
+  frequentlyUsedProjects: z.array(ProjectUsageStatSchema).default([]),
+  frequentlyUsedTools: z.array(ToolUsageStatSchema).default([]),
+  recurringTaskSequences: z.array(RecurringSequenceSchema).default([]),
+  preferredWorkflows: z.array(z.object({
+    name: z.string(),
+    description: z.string(),
+    frequency: z.number().default(1),
+  })).default([]),
+  lastUpdated: z.string().default(() => new Date().toISOString()),
+});
+export type WorkPatternsPreference = z.infer<typeof WorkPatternsPreferenceSchema>;
+
+export const InteractionPreferencesSchema = z.object({
+  preferredInputModality: z.enum(['text', 'voice', 'hybrid']).default('text'),
+  preferredModality: z.enum(['text', 'voice', 'hybrid']).default('text'),
+  preferredVoiceId: z.string().optional(),
+  preferredUiMode: z.enum(['dark', 'light', 'system']).default('system'),
+  preferredConfirmationBehavior: z.enum(['standard', 'always_confirm_high_risk', 'conversational_summary']).default('standard'),
+  lastUpdated: z.string().default(() => new Date().toISOString()),
+});
+export type InteractionPreferences = z.infer<typeof InteractionPreferencesSchema>;
+
+export const TrackedProjectContextSchema = z.object({
+  projectId: z.string().optional(),
+  name: z.string(),
+  path: z.string().optional(),
+  technologies: z.array(z.string()).default([]),
+  recurringGoals: z.array(z.string()).default([]),
+  frequency: z.number().default(1),
+  lastAccessed: z.string().default(() => new Date().toISOString()),
+});
+export type TrackedProjectContext = z.infer<typeof TrackedProjectContextSchema>;
+
+export const ProjectContextPreferenceSchema = z.object({
+  projects: z.array(TrackedProjectContextSchema).default([]),
+  frequentlyUsedProjects: z.array(TrackedProjectContextSchema).default([]),
+  activeProject: z.string().optional(),
+  recentGoals: z.array(z.string()).default([]),
+  lastUpdated: z.string().default(() => new Date().toISOString()),
+});
+export type ProjectContextPreference = z.infer<typeof ProjectContextPreferenceSchema>;
+
+export const PersonalContextModelSchema = z.object({
+  userId: z.string().default('operator'),
+  communicationStyle: CommunicationStylePreferenceSchema.default({}),
+  workPatterns: WorkPatternsPreferenceSchema.default({}),
+  interactionPreferences: InteractionPreferencesSchema.default({}),
+  projectContext: ProjectContextPreferenceSchema.default({}),
+  internalAdaptationScore: z.number().min(0).max(100).default(0), // Maintained internally, NEVER exposed to user as an intelligence score
+  lastEvaluatedAt: z.string().default(() => new Date().toISOString()),
+  version: z.number().default(1),
+});
+export type PersonalContextModel = z.infer<typeof PersonalContextModelSchema>;
+
+export const InteractionEventSchema = z.object({
+  id: z.string(),
+  timestamp: z.string().default(() => new Date().toISOString()),
+  type: z.enum(['task_execution', 'user_message', 'tool_invocation', 'ui_interaction', 'voice_turn']).default('task_execution'),
+  goal: z.string().optional(),
+  toolsUsed: z.array(z.string()).default([]),
+  modality: z.enum(['text', 'voice']).default('text'),
+  status: z.enum(['completed', 'failed', 'cancelled']).default('completed'),
+  communicationStyleObserved: CommunicationStylePreferenceSchema.partial().optional(),
+  projectId: z.string().optional(),
+  technologies: z.array(z.string()).optional(),
+  payload: z.record(z.unknown()).default({}),
+  metadata: z.object({
+    workspaceId: z.string().optional(),
+    projectId: z.string().optional(),
+    source: z.string().optional(),
+  }).optional(),
+});
+export type InteractionEvent = z.infer<typeof InteractionEventSchema>;
+
+export const CandidatePreferenceSchema = z.object({
+  id: z.string(),
+  dimension: z.enum(['communication_style', 'work_patterns', 'interaction_preferences', 'project_context']),
+  patternKey: z.string(),
+  statement: z.string(),
+  inferredValue: z.unknown(),
+  occurrenceCount: z.number().default(1),
+  confidence: z.number().min(0).max(1).default(0.3),
+  status: z.enum(['observed_once', 'candidate', 'awaiting_confirmation', 'confirmed', 'rejected', 'snoozed']).default('observed_once'),
+  isEligibleForProposal: z.boolean().default(false),
+  firstObservedAt: z.string().default(() => new Date().toISOString()),
+  lastObservedAt: z.string().default(() => new Date().toISOString()),
+  confirmationPrompt: z.string().optional(),
+});
+export type CandidatePreference = z.infer<typeof CandidatePreferenceSchema>;
+
+export const PersonalConfirmationProposalSchema = z.object({
+  id: z.string(),
+  proposalId: z.string(),
+  candidateId: z.string(),
+  patternKey: z.string().optional(),
+  prompt: z.string(),
+  dimension: z.enum(['communication_style', 'work_patterns', 'interaction_preferences', 'project_context']),
+  detectedPattern: z.string(),
+  confidence: z.number().min(0).max(1),
+  options: z.tuple([z.literal('Yes'), z.literal('No'), z.literal('Not now')]).default(['Yes', 'No', 'Not now']),
+  createdAt: z.string().default(() => new Date().toISOString()),
+  status: z.enum(['pending', 'accepted', 'rejected', 'snoozed']).default('pending'),
+});
+export type PersonalConfirmationProposal = z.infer<typeof PersonalConfirmationProposalSchema>;
+
+export const PersonalAdaptationConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+  minOccurrencesForCandidate: z.number().int().min(2).default(3),
+  minConfidenceForProposal: z.number().min(0.5).max(1.0).default(0.7),
+  autoReinforceMemory: z.boolean().default(true),
+  requireConfirmationForWorkPatterns: z.boolean().default(true),
+  maxRecentInteractions: z.number().int().min(10).default(100),
+  snoozeDurationHours: z.number().default(24),
+});
+export type PersonalAdaptationConfig = z.infer<typeof PersonalAdaptationConfigSchema>;
+

@@ -29,12 +29,23 @@ export interface MemoryContextSnippet {
 export class AlinaConversationalPersona {
   private config: AlinaPersonalityConfig;
 
-  constructor(config: Partial<AlinaPersonalityConfig> = {}) {
+  private personalContext?: PersonalContextModel;
+
+  constructor(config: Partial<AlinaPersonalityConfig> = {}, personalContext?: PersonalContextModel) {
     this.config = { ...DEFAULT_ALINA_PERSONALITY, ...config };
+    this.personalContext = personalContext;
   }
 
   public getConfig(): AlinaPersonalityConfig {
     return { ...this.config };
+  }
+
+  public setPersonalContext(context: PersonalContextModel): void {
+    this.personalContext = context;
+  }
+
+  public getPersonalContext(): PersonalContextModel | undefined {
+    return this.personalContext;
   }
 
   /**
@@ -49,11 +60,34 @@ export class AlinaConversationalPersona {
       timeGreeting = 'Good evening';
     }
 
-    if (recentProjectName && this.config.conversationalFamiliarity === 'familiar') {
-      return `${timeGreeting}. Ready when you are on ${recentProjectName}.`;
+    const proj = recentProjectName || this.personalContext?.projectContext.activeProject;
+    if (proj && this.config.conversationalFamiliarity === 'familiar') {
+      return `${timeGreeting}. Ready when you are on ${proj}.`;
     }
 
     return `${timeGreeting}.`;
+  }
+
+  /**
+   * Conversational greeting alias supporting concise style adaptation.
+   */
+  public greet(recentProjectName?: string): string {
+    if (this.personalContext?.communicationStyle.conciseness === 'concise') {
+      return 'Ready.';
+    }
+    return 'Good day. How may I assist you?';
+  }
+
+  /**
+   * Formats system prompt with personalized context block.
+   */
+  public formatSystemPrompt(memories?: MemoryContextSnippet[], contextOverride?: PersonalContextModel): string {
+    const context = contextOverride || this.personalContext;
+    const base = this.getSystemPersonaPrompt(memories, contextOverride);
+    if (context) {
+      return `${base}\n\n[Personalized User Context Active: conciseness=${context.communicationStyle.conciseness}, formality=${context.communicationStyle.formality}]`;
+    }
+    return base;
   }
 
   /**
@@ -68,7 +102,6 @@ export class AlinaConversationalPersona {
         (m) => m.category === 'preference' || m.category === 'project_context' || m.category === 'context'
       );
       if (topContext && topContext.content.length < 80) {
-        // e.g. "Sure, working with your preference for light mode and strict types."
         return `Working on that now.`;
       }
     }
@@ -106,13 +139,28 @@ export class AlinaConversationalPersona {
   /**
    * Builds the system prompt persona instruction injected into LLM contexts.
    */
-  public getSystemPersonaPrompt(memories?: MemoryContextSnippet[]): string {
+  public getSystemPersonaPrompt(memories?: MemoryContextSnippet[], contextOverride?: PersonalContextModel): string {
+    const context = contextOverride || this.personalContext;
+    const conciseness = context?.communicationStyle.conciseness || this.config.verbosity;
+    const formality = context?.communicationStyle.formality || (this.config.conversationalFamiliarity === 'formal' ? 'formal' : 'casual');
+    const structure = context?.communicationStyle.preferredResponseStructure || 'editorial_summary';
+
     const base = [
       `You are ${this.config.name}, a calm, local-first personal computer companion.`,
       `Tone: warm, intelligent, professional, friendly, subtle.`,
-      `Verbosity: concise by default. Never use robotic canned phrases like "Hello, how can I help you today?" or "As an AI model...".`,
+      `Communication Style: ${conciseness}, ${formality}. Preferred structure: ${structure}.`,
       `Communicate with natural familiarity, like a trusted technical peer who knows the operator's workspace.`,
     ];
+
+    if (context) {
+      if (context.projectContext.activeProject) {
+        base.push(`Active Workspace Project: ${context.projectContext.activeProject}`);
+      }
+      const topTools = context.workPatterns.frequentlyUsedTools.slice(0, 3).map((t) => t.toolName);
+      if (topTools.length > 0) {
+        base.push(`Operator's Preferred Tools: ${topTools.join(', ')}`);
+      }
+    }
 
     if (memories && memories.length > 0 && this.config.useMemoryContext) {
       base.push(
