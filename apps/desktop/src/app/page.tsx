@@ -33,6 +33,7 @@ import { DeveloperObservabilityPanel } from '@/components/DeveloperObservability
 import { KnowledgeExplorer } from '@/components/KnowledgeExplorer';
 import { SourceCitationBadge } from '@/components/SourceCitationBadge';
 import { useVoiceInteraction } from '@/hooks/useVoiceInteraction';
+import { LearnWithMePanel } from '@/components/LearnWithMePanel';
 
 
 interface MockTask {
@@ -326,6 +327,15 @@ export default function AlinaHomePage() {
     mode: 'verify_and_execute' | 'ask_always',
     fromVoice = false
   ) => {
+    if (/\blearn\b/i.test(goalText)) {
+      setActiveNav('learning');
+      addToast('Learn With Me Activated', 'Switched to collaborative learning workspace.', 'success');
+      if (fromVoice) {
+        speakSummary("Starting our collaborative learning workspace. I've researched official documentation and mapped the core concepts into a knowledge graph.");
+      }
+      return;
+    }
+
     const tempId = `task-${Date.now()}`;
     const newTask: MockTask = {
       id: tempId,
@@ -731,6 +741,7 @@ export default function AlinaHomePage() {
                 placeholder="What would you like ALINA to plan and execute?"
                 onSubmit={handleComposerSubmit}
                 quickPrompts={[
+                  "Alina, I'm starting to learn Rust. Help me learn it.",
                   'Audit repository architecture & package boundaries',
                   'Verify monorepo build outputs and Vitest suite',
                   'Index local documentation into semantic vector memory',
@@ -993,6 +1004,11 @@ export default function AlinaHomePage() {
             <KnowledgeExplorer onToast={addToast} />
           )}
         </div>
+      )}
+
+      {/* Dedicated Learn With Me View */}
+      {activeNav === 'learning' && (
+        <LearnWithMePanel onToast={addToast} />
       )}
 
       {/* Dedicated Security & PathJail View */}

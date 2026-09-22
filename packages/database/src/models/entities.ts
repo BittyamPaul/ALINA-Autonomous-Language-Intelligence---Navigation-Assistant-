@@ -518,3 +518,169 @@ export const WorkingKnowledgeContextSchema = z.object({
 });
 export type WorkingKnowledgeContextEntity = z.infer<typeof WorkingKnowledgeContextSchema>;
 
+// ============================================================================
+// "Learn With Me" Collaborative Learning Database Entities
+// ============================================================================
+
+export const KnowledgeWorkspaceStatusSchema = z.enum(['active', 'archived', 'completed']);
+export type KnowledgeWorkspaceStatus = z.infer<typeof KnowledgeWorkspaceStatusSchema>;
+
+export const KnowledgeWorkspaceStatsSchema = z.object({
+  totalConcepts: z.number().int().nonnegative().default(0),
+  understoodConcepts: z.number().int().nonnegative().default(0),
+  masteredConcepts: z.number().int().nonnegative().default(0),
+  openQuestionsCount: z.number().int().nonnegative().default(0),
+  practiceTasksCount: z.number().int().nonnegative().default(0),
+});
+export type KnowledgeWorkspaceStats = z.infer<typeof KnowledgeWorkspaceStatsSchema>;
+
+export const KnowledgeWorkspaceSchema = z.object({
+  id: z.string(),
+  name: z.string().min(1),
+  subject: z.string().min(1),
+  description: z.string().default(''),
+  status: KnowledgeWorkspaceStatusSchema.default('active'),
+  activeTopicId: z.string().optional(),
+  linkedProjectId: z.string().optional(),
+  stats: KnowledgeWorkspaceStatsSchema.default({
+    totalConcepts: 0,
+    understoodConcepts: 0,
+    masteredConcepts: 0,
+    openQuestionsCount: 0,
+    practiceTasksCount: 0,
+  }),
+  metadata: NoSecretsSchema.default({}),
+  createdAt: z.string().datetime().default(() => new Date().toISOString()),
+  updatedAt: z.string().datetime().default(() => new Date().toISOString()),
+});
+export type KnowledgeWorkspaceEntity = z.infer<typeof KnowledgeWorkspaceSchema>;
+
+export const LearningTopicStatusSchema = z.enum(['not_started', 'in_progress', 'completed']);
+export type LearningTopicStatus = z.infer<typeof LearningTopicStatusSchema>;
+
+export const LearningCodeExampleSchema = z.object({
+  title: z.string(),
+  code: z.string(),
+  language: z.string().default('rust'),
+  explanation: z.string().optional(),
+});
+export type LearningCodeExample = z.infer<typeof LearningCodeExampleSchema>;
+
+export const LearningTopicSchema = z.object({
+  id: z.string(),
+  workspaceId: z.string(),
+  name: z.string().min(1),
+  slug: z.string().min(1),
+  summary: z.string().default(''),
+  keyPrinciples: z.array(z.string()).default([]),
+  codeExamples: z.array(LearningCodeExampleSchema).default([]),
+  status: LearningTopicStatusSchema.default('not_started'),
+  orderIndex: z.number().int().nonnegative().default(0),
+  createdAt: z.string().datetime().default(() => new Date().toISOString()),
+  updatedAt: z.string().datetime().default(() => new Date().toISOString()),
+});
+export type LearningTopicEntity = z.infer<typeof LearningTopicSchema>;
+
+export const ConceptMasteryLevelSchema = z.enum(['not_started', 'in_progress', 'understood', 'mastered']);
+export type ConceptMasteryLevel = z.infer<typeof ConceptMasteryLevelSchema>;
+
+export const LearningProgressSchema = z.object({
+  id: z.string(),
+  workspaceId: z.string(),
+  topicId: z.string().optional(),
+  conceptName: z.string().min(1),
+  masteryLevel: ConceptMasteryLevelSchema.default('not_started'),
+  timesReviewed: z.number().int().nonnegative().default(0),
+  confidenceScore: z.number().min(0).max(1).default(0.0),
+  lastReviewedAt: z.string().datetime().default(() => new Date().toISOString()),
+  notes: z.string().optional(),
+  createdAt: z.string().datetime().default(() => new Date().toISOString()),
+  updatedAt: z.string().datetime().default(() => new Date().toISOString()),
+});
+export type LearningProgressEntity = z.infer<typeof LearningProgressSchema>;
+
+export const ConceptRelationTypeSchema = z.enum([
+  'prerequisite_of',
+  'builds_on',
+  'relates_to',
+  'extends',
+  'applied_in',
+]);
+export type ConceptRelationType = z.infer<typeof ConceptRelationTypeSchema>;
+
+export const ConceptRelationshipSchema = z.object({
+  id: z.string(),
+  workspaceId: z.string(),
+  fromConcept: z.string().min(1),
+  toConcept: z.string().min(1),
+  relationType: ConceptRelationTypeSchema.default('builds_on'),
+  description: z.string().optional(),
+  createdAt: z.string().datetime().default(() => new Date().toISOString()),
+});
+export type ConceptRelationshipEntity = z.infer<typeof ConceptRelationshipSchema>;
+
+export const QuestionStatusSchema = z.enum(['open', 'investigating', 'answered']);
+export type QuestionStatus = z.infer<typeof QuestionStatusSchema>;
+
+export const LearningQuestionSchema = z.object({
+  id: z.string(),
+  workspaceId: z.string(),
+  topicId: z.string().optional(),
+  question: z.string().min(1),
+  status: QuestionStatusSchema.default('open'),
+  answer: z.string().optional(),
+  askedBy: z.enum(['user', 'alina']).default('user'),
+  resolvedAt: z.string().datetime().optional(),
+  createdAt: z.string().datetime().default(() => new Date().toISOString()),
+  updatedAt: z.string().datetime().default(() => new Date().toISOString()),
+});
+export type LearningQuestionEntity = z.infer<typeof LearningQuestionSchema>;
+
+export const LearningDiscoverySchema = z.object({
+  id: z.string(),
+  workspaceId: z.string(),
+  topicId: z.string().optional(),
+  discovery: z.string().min(1),
+  sourceUrl: z.string().optional(),
+  connectedConcept: z.string().optional(),
+  discoveredAt: z.string().datetime().default(() => new Date().toISOString()),
+});
+export type LearningDiscoveryEntity = z.infer<typeof LearningDiscoverySchema>;
+
+export const PracticeTaskStatusSchema = z.enum(['pending', 'in_progress', 'completed', 'skipped']);
+export type PracticeTaskStatus = z.infer<typeof PracticeTaskStatusSchema>;
+
+export const PracticeTaskSchema = z.object({
+  id: z.string(),
+  workspaceId: z.string(),
+  topicId: z.string().optional(),
+  title: z.string().min(1),
+  instructions: z.string().min(1),
+  starterCode: z.string().optional(),
+  solutionCode: z.string().optional(),
+  evaluationCriteria: z.array(z.string()).default([]),
+  status: PracticeTaskStatusSchema.default('pending'),
+  userSubmission: z.string().optional(),
+  feedback: z.string().optional(),
+  createdAt: z.string().datetime().default(() => new Date().toISOString()),
+  updatedAt: z.string().datetime().default(() => new Date().toISOString()),
+});
+export type PracticeTaskEntity = z.infer<typeof PracticeTaskSchema>;
+
+export const LearningSessionSchema = z.object({
+  id: z.string(),
+  workspaceId: z.string(),
+  topicId: z.string().optional(),
+  startedAt: z.string().datetime().default(() => new Date().toISOString()),
+  endedAt: z.string().datetime().optional(),
+  objective: z.string().min(1),
+  summary: z.string().default(''),
+  notes: z.array(z.string()).default([]),
+  conceptsCovered: z.array(z.string()).default([]),
+  questionsAsked: z.array(z.string()).default([]),
+  practiceTasksGenerated: z.array(z.string()).default([]),
+  createdAt: z.string().datetime().default(() => new Date().toISOString()),
+});
+export type LearningSessionEntity = z.infer<typeof LearningSessionSchema>;
+
+

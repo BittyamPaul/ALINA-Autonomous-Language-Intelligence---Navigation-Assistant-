@@ -29,6 +29,12 @@ import type {
   KnowledgeItem,
   KnowledgeSource,
   KnowledgeTopic,
+  KnowledgeWorkspace,
+  LearningProgress,
+  ConceptRelationship,
+  LearningQuestion,
+  LearningDiscovery,
+  PracticeTask,
 } from '@alina/shared';
 
 export class AlinaApiClient {
@@ -302,6 +308,92 @@ export class AlinaApiClient {
         method: 'POST',
         body: JSON.stringify(data),
       }),
+  };
+
+  // "Learn With Me" Collaborative Learning Engine
+  public readonly learning = {
+    listWorkspaces: () =>
+      this.request<KnowledgeWorkspace[]>('/api/learning/workspaces'),
+    getWorkspace: (id: string) =>
+      this.request<{
+        workspace: KnowledgeWorkspace;
+        topics: KnowledgeTopic[];
+        progress: LearningProgress[];
+        conceptChain: Array<{ from: string; to: string; relationType: string; description?: string }>;
+        sources: KnowledgeSource[];
+        questions: LearningQuestion[];
+        discoveries: LearningDiscovery[];
+        practiceTasks: PracticeTask[];
+      }>(`/api/learning/workspaces/${encodeURIComponent(id)}`),
+    start: (subject: string, options?: { projectId?: string; initialUnderstoodConcepts?: string[] }) =>
+      this.request<{
+        workspace: KnowledgeWorkspace;
+        topics: KnowledgeTopic[];
+        conceptRelationships: ConceptRelationship[];
+        sources: KnowledgeSource[];
+      }>('/api/learning/workspaces', {
+        method: 'POST',
+        body: JSON.stringify({ subject, ...options }),
+      }),
+    getContext: (workspaceId: string) =>
+      this.request<{
+        workspace: KnowledgeWorkspace;
+        understoodConcepts: LearningProgress[];
+        inProgressConcepts: LearningProgress[];
+        openQuestions: LearningQuestion[];
+        promptInjection: string;
+      }>(`/api/learning/workspaces/${encodeURIComponent(workspaceId)}/context`),
+    ask: (workspaceId: string, inquiry: string) =>
+      this.request<{
+        answer: string;
+        updatedProgress: LearningProgress[];
+        newQuestions: LearningQuestion[];
+        newDiscoveries: LearningDiscovery[];
+      }>(`/api/learning/workspaces/${encodeURIComponent(workspaceId)}/ask`, {
+        method: 'POST',
+        body: JSON.stringify({ inquiry }),
+      }),
+    addQuestion: (workspaceId: string, question: string) =>
+      this.request<LearningQuestion>(`/api/learning/workspaces/${encodeURIComponent(workspaceId)}/questions`, {
+        method: 'POST',
+        body: JSON.stringify({ question }),
+      }),
+    updateQuestion: (workspaceId: string, questionId: string, patch: Partial<LearningQuestion>) =>
+      this.request<LearningQuestion>(
+        `/api/learning/workspaces/${encodeURIComponent(workspaceId)}/questions/${encodeURIComponent(questionId)}`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify(patch),
+        }
+      ),
+    advanceProgress: (workspaceId: string, conceptName: string, masteryLevel: 'understood' | 'mastered') =>
+      this.request<LearningProgress>(`/api/learning/workspaces/${encodeURIComponent(workspaceId)}/progress`, {
+        method: 'POST',
+        body: JSON.stringify({ conceptName, masteryLevel }),
+      }),
+    createPracticeTask: (workspaceId: string, topicId?: string) =>
+      this.request<PracticeTask>(`/api/learning/workspaces/${encodeURIComponent(workspaceId)}/tasks`, {
+        method: 'POST',
+        body: JSON.stringify({ topicId }),
+      }),
+    submitPracticeTask: (taskId: string, userCode: string) =>
+      this.request<{
+        passed: boolean;
+        score: number;
+        feedback: string;
+        conceptAdvanced?: string;
+        task: PracticeTask;
+      }>(`/api/learning/tasks/${encodeURIComponent(taskId)}/submit`, {
+        method: 'POST',
+        body: JSON.stringify({ userCode }),
+      }),
+    deleteWorkspace: (workspaceId: string) =>
+      this.request<{ success: boolean; deletedId: string }>(
+        `/api/learning/workspaces/${encodeURIComponent(workspaceId)}`,
+        {
+          method: 'DELETE',
+        }
+      ),
   };
 }
 

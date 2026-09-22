@@ -4,6 +4,7 @@ import {
   CheckSquare,
   Activity,
   Brain,
+  GraduationCap,
   ShieldCheck,
   Settings,
   FolderLock,
@@ -13,7 +14,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../utils';
 
-export type NavItemKey = 'home' | 'tasks' | 'activity' | 'memory' | 'security' | 'observability' | 'settings';
+export type NavItemKey = 'home' | 'tasks' | 'activity' | 'memory' | 'learning' | 'security' | 'observability' | 'settings';
 
 export interface NavItem {
   key: NavItemKey;
@@ -62,6 +63,11 @@ export function Sidebar({
       key: 'memory',
       label: 'Semantic Memory',
       icon: <Brain className="w-4 h-4" />,
+    },
+    {
+      key: 'learning',
+      label: 'Learn With Me',
+      icon: <GraduationCap className="w-4 h-4" />,
     },
     {
       key: 'security',

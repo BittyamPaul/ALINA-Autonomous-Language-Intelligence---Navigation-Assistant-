@@ -5,4 +5,5 @@ export * from './memory-repo';
 export * from './audit-repo';
 export * from './graph-repo';
 export * from './knowledge-repo';
+export * from './learn-with-me-repo';
 
