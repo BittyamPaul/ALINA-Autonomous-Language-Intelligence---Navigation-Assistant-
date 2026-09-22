@@ -9,4 +9,5 @@ export * from './audit-service';
 export * from './observability-service';
 export * from './knowledge-service';
 export * from './learn-with-me-service';
+export * from './network-readiness-service';
 

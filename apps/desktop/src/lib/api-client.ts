@@ -35,6 +35,10 @@ import type {
   LearningQuestion,
   LearningDiscovery,
   PracticeTask,
+  StartupHealthCheckResult,
+  WifiNetwork,
+  WifiConnectResult,
+  AutoStartConfig,
 } from '@alina/shared';
 
 export class AlinaApiClient {
@@ -394,6 +398,37 @@ export class AlinaApiClient {
           method: 'DELETE',
         }
       ),
+  };
+
+  // Startup & Network Readiness
+  public readonly network = {
+    getStatus: () =>
+      this.request<StartupHealthCheckResult>('/api/network/status'),
+    reconnect: () =>
+      this.request<StartupHealthCheckResult>('/api/network/reconnect', {
+        method: 'POST',
+      }),
+    scanWifi: () =>
+      this.request<WifiNetwork[]>('/api/network/wifi/scan'),
+    connectWifi: (ssid: string, password?: string) =>
+      this.request<WifiConnectResult>('/api/network/wifi/connect', {
+        method: 'POST',
+        body: JSON.stringify({ ssid, password }),
+      }),
+    getAutostart: () =>
+      this.request<AutoStartConfig>('/api/network/autostart'),
+    setAutostart: (enabled: boolean) =>
+      this.request<{ success: boolean; enabled: boolean }>('/api/network/autostart', {
+        method: 'POST',
+        body: JSON.stringify({ enabled }),
+      }),
+    getAutoStartStatus: () =>
+      this.request<AutoStartConfig>('/api/network/autostart'),
+    setAutoStart: (enabled: boolean) =>
+      this.request<{ success: boolean; enabled: boolean }>('/api/network/autostart', {
+        method: 'POST',
+        body: JSON.stringify({ enabled }),
+      }),
   };
 }
 

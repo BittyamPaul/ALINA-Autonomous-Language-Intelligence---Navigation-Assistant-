@@ -25,6 +25,8 @@ import {
   Play,
   CheckCircle2,
   Lock,
+  WifiOff,
+  X,
 } from 'lucide-react';
 import { alinaApi } from '@/lib/api-client';
 import { NativeDesktopPanel } from '@/components/NativeDesktopPanel';
@@ -34,6 +36,9 @@ import { KnowledgeExplorer } from '@/components/KnowledgeExplorer';
 import { SourceCitationBadge } from '@/components/SourceCitationBadge';
 import { useVoiceInteraction } from '@/hooks/useVoiceInteraction';
 import { LearnWithMePanel } from '@/components/LearnWithMePanel';
+import { NetworkStatusIndicator } from '@/components/NetworkStatusIndicator';
+import { WifiOnboardingDialog } from '@/components/WifiOnboardingDialog';
+import type { NetworkReadinessState } from '@alina/shared';
 
 
 interface MockTask {
@@ -63,6 +68,10 @@ export default function AlinaHomePage() {
   const [toasts, setToasts] = useState<ToastProps[]>([]);
   const [errorBannerVisible, setErrorBannerVisible] = useState(false);
   const [memoryTierTab, setMemoryTierTab] = useState<'personal' | 'persistent'>('personal');
+  const [networkState, setNetworkState] = useState<NetworkReadinessState>('STARTING');
+  const [wifiDialogOpen, setWifiDialogOpen] = useState(false);
+  const [autoStartEnabled, setAutoStartEnabled] = useState(false);
+  const [offlineBannerDismissed, setOfflineBannerDismissed] = useState(false);
 
 
   // Sync theme with <html> class list
@@ -75,6 +84,85 @@ export default function AlinaHomePage() {
       }
     }
   }, [theme]);
+
+  // Check auto-start & network readiness on startup
+  useEffect(() => {
+    let isMounted = true;
+    async function initNetworkAndAutoStart() {
+      try {
+        const [netRes, autoStartRes] = await Promise.all([
+          alinaApi.network.getStatus(),
+          alinaApi.network.getAutoStartStatus(),
+        ]);
+        if (isMounted) {
+          if (netRes.success && netRes.data) {
+            setNetworkState(netRes.data.state);
+          }
+          if (autoStartRes.success && autoStartRes.data) {
+            setAutoStartEnabled(autoStartRes.data.enabled);
+          }
+        }
+      } catch {
+        if (isMounted) {
+          setNetworkState('OFFLINE');
+        }
+      }
+    }
+
+    initNetworkAndAutoStart();
+
+    // Periodic network check every 10s
+    const interval = setInterval(async () => {
+      try {
+        const netRes = await alinaApi.network.getStatus();
+        if (isMounted && netRes.success && netRes.data) {
+          setNetworkState(netRes.data.state);
+        }
+      } catch {
+        // Ignored
+      }
+    }, 10000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, []);
+
+  const handleToggleAutoStart = async (enabled: boolean) => {
+    setAutoStartEnabled(enabled);
+    try {
+      const res = await alinaApi.network.setAutoStart(enabled);
+      if (res.success) {
+        addToast(
+          'Auto-Start Updated',
+          enabled ? 'ALINA will launch on Windows startup in local mode.' : 'Windows auto-start disabled.',
+          'info'
+        );
+      }
+    } catch {
+      addToast('Auto-Start Configuration Failed', 'Could not update Windows startup registry.', 'error');
+    }
+  };
+
+  const handleReconnect = async () => {
+    setNetworkState('CONNECTING');
+    addToast('Connecting', 'Testing internet reachability...', 'info');
+    try {
+      const res = await alinaApi.network.reconnect();
+      if (res.success && res.data) {
+        setNetworkState(res.data.state);
+        if (res.data.state === 'ONLINE') {
+          addToast('Connected', 'Internet connection established.', 'success');
+        } else {
+          addToast('Offline', 'Could not reach the internet.', 'warning');
+        }
+      }
+    } catch {
+      setNetworkState('OFFLINE');
+      addToast('Connection Failed', 'Local features remain available.', 'warning');
+    }
+  };
 
   // Load real tasks and memories from backend service
   useEffect(() => {
@@ -664,6 +752,15 @@ export default function AlinaHomePage() {
       availableVoices={availableVoices}
       transcriptDebugMode={transcriptDebugMode}
       onTranscriptDebugModeChange={setTranscriptDebugMode}
+      autoStartEnabled={autoStartEnabled}
+      onAutoStartEnabledChange={handleToggleAutoStart}
+      networkStatus={
+        <NetworkStatusIndicator
+          state={networkState}
+          onConnectClick={() => setWifiDialogOpen(true)}
+          onRetryClick={handleReconnect}
+        />
+      }
     >
       {/* Navigation Views */}
       {activeNav === 'home' && (
@@ -683,6 +780,39 @@ export default function AlinaHomePage() {
                 }}
                 onDismiss={() => setErrorBannerVisible(false)}
               />
+            ) : (networkState === 'OFFLINE' || networkState === 'DEGRADED') && !offlineBannerDismissed ? (
+              <div className="flex items-center justify-between p-3.5 rounded-lg border bg-stone-50 dark:bg-stone-900 border-amber-300 dark:border-amber-700/60 shadow-xs animate-in fade-in">
+                <div className="flex items-center space-x-3">
+                  <div className="w-8 h-8 rounded-full bg-amber-100 dark:bg-amber-950 flex items-center justify-center shrink-0">
+                    <WifiOff className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-semibold text-stone-900 dark:text-stone-100 font-sans">
+                      You&apos;re offline. Local features are still available.
+                    </h4>
+                    <p className="text-[11px] text-stone-500 dark:text-stone-400 font-sans mt-0.5">
+                      Local filesystem tasks, SurrealDB queries, and semantic vector memory remain 100% operational.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center space-x-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setWifiDialogOpen(true)}
+                    className="px-2.5 py-1 text-xs font-medium rounded-md bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900 hover:bg-stone-800 dark:hover:bg-white transition-colors"
+                  >
+                    Connect Wi-Fi
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setOfflineBannerDismissed(true)}
+                    className="p-1 rounded text-stone-400 hover:text-stone-600 dark:hover:text-stone-200 transition-colors"
+                    aria-label="Dismiss offline banner"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
             ) : undefined
           }
           composer={
@@ -1176,6 +1306,16 @@ export default function AlinaHomePage() {
         status="pending"
         onApprove={handleApproveAction}
         onDeny={handleDenyAction}
+      />
+
+      {/* Ephemeral Wi-Fi Onboarding Dialog */}
+      <WifiOnboardingDialog
+        open={wifiDialogOpen}
+        onOpenChange={setWifiDialogOpen}
+        onConnected={(ssid) => {
+          setNetworkState('ONLINE');
+          addToast('Connected to ' + ssid, 'Internet connection verified and active.', 'success');
+        }}
       />
     </AppShell>
   );

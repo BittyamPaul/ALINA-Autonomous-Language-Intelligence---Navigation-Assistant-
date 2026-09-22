@@ -44,6 +44,10 @@ export interface AppShellProps {
   availableVoices?: Array<{ id: string; name: string; lang: string; gender?: string }>;
   transcriptDebugMode?: boolean;
   onTranscriptDebugModeChange?: (enabled: boolean) => void;
+  // Windows Auto-Start & Network Status
+  autoStartEnabled?: boolean;
+  onAutoStartEnabledChange?: (enabled: boolean) => void;
+  networkStatus?: ReactNode;
 }
 
 export function AppShell({
@@ -73,6 +77,9 @@ export function AppShell({
   availableVoices = [],
   transcriptDebugMode = false,
   onTranscriptDebugModeChange,
+  autoStartEnabled = false,
+  onAutoStartEnabledChange,
+  networkStatus,
 }: AppShellProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -169,6 +176,7 @@ export function AppShell({
           onOpenSettings={() => setSettingsOpen(true)}
           onToggleMobileMenu={() => setMobileMenuOpen((prev) => !prev)}
           pendingApprovalsCount={pendingApprovalsCount}
+          networkStatus={networkStatus}
         />
 
         {/* Scrollable Content Viewport with mobile safe-area insets */}
@@ -281,6 +289,8 @@ export function AppShell({
         availableVoices={availableVoices}
         transcriptDebugMode={transcriptDebugMode}
         onTranscriptDebugModeChange={onTranscriptDebugModeChange}
+        autoStartEnabled={autoStartEnabled}
+        onAutoStartEnabledChange={onAutoStartEnabledChange}
       />
 
       {/* Toast Notifications */}

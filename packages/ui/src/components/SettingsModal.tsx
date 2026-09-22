@@ -39,6 +39,9 @@ export interface SettingsModalProps {
   availableVoices?: Array<{ id: string; name: string; lang: string; gender?: string }>;
   transcriptDebugMode?: boolean;
   onTranscriptDebugModeChange?: (enabled: boolean) => void;
+  // Windows Auto-Start
+  autoStartEnabled?: boolean;
+  onAutoStartEnabledChange?: (enabled: boolean) => void;
 }
 
 export function SettingsModal({
@@ -59,6 +62,8 @@ export function SettingsModal({
   availableVoices = [],
   transcriptDebugMode = false,
   onTranscriptDebugModeChange,
+  autoStartEnabled = false,
+  onAutoStartEnabledChange,
 }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState('general');
   const [approvalAlwaysRequired, setApprovalAlwaysRequired] = useState(true);
@@ -185,6 +190,30 @@ export function SettingsModal({
                       <div
                         className={`w-5 h-5 rounded-full bg-white transition-transform ${
                           telemetryEnabled ? 'translate-x-4' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="pt-4 border-t border-stone-100 dark:border-stone-800">
+                  <h4 className="text-sm font-semibold text-stone-900 dark:text-stone-100">Windows Auto-Start</h4>
+                  <p className="text-xs text-stone-500 mt-0.5">
+                    Launch ALINA automatically in local readiness mode on Windows startup.
+                  </p>
+                  <div className="mt-3 flex items-center justify-between">
+                    <span className="text-xs text-stone-700 dark:text-stone-300">Start ALINA on Windows boot</span>
+                    <button
+                      type="button"
+                      onClick={() => onAutoStartEnabledChange?.(!autoStartEnabled)}
+                      className={`w-10 h-6 rounded-full transition-colors relative flex items-center px-0.5 ${
+                        autoStartEnabled ? 'bg-amber-600' : 'bg-stone-200 dark:bg-stone-700'
+                      }`}
+                      aria-label="Toggle Windows auto-start"
+                    >
+                      <div
+                        className={`w-5 h-5 rounded-full bg-white transition-transform ${
+                          autoStartEnabled ? 'translate-x-4' : 'translate-x-0'
                         }`}
                       />
                     </button>

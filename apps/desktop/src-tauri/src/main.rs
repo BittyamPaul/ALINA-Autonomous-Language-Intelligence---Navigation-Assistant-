@@ -137,7 +137,12 @@ fn main() {
             get_native_system_info,
             capture_native_screenshot,
             controlled_keyboard_input,
-            controlled_mouse_input
+            controlled_mouse_input,
+            get_network_status,
+            get_autostart_status,
+            set_autostart,
+            scan_wifi_networks,
+            connect_wifi
         ])
         .run(tauri::generate_context!())
         .expect("error while running ALINA desktop application");

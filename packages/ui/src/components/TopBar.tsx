@@ -1,3 +1,4 @@
+import { ReactNode } from 'react';
 import {
   Search,
   Sun,
@@ -18,6 +19,7 @@ export interface TopBarProps {
   pendingApprovalsCount?: number;
   onToggleMobileMenu?: () => void;
   className?: string;
+  networkStatus?: ReactNode;
 }
 
 export function TopBar({
@@ -29,6 +31,7 @@ export function TopBar({
   pendingApprovalsCount = 0,
   onToggleMobileMenu,
   className,
+  networkStatus,
 }: TopBarProps) {
   return (
     <header
@@ -86,6 +89,7 @@ export function TopBar({
 
       {/* Right: Actions & Status */}
       <div className="flex items-center space-x-2">
+        {networkStatus}
         {/* System Health Status */}
         <div
           className="hidden sm:flex items-center space-x-1 px-2 py-1 rounded text-[10px] font-mono text-stone-600 dark:text-stone-400 bg-stone-100/70 dark:bg-stone-850 border border-stone-200/70 dark:border-stone-800"

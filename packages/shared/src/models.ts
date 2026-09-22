@@ -1118,4 +1118,83 @@ export const LearningSessionSchema = z.object({
 });
 export type LearningSession = z.infer<typeof LearningSessionSchema>;
 
+// ============================================================================
+// Startup & Network Readiness Schemas
+// ============================================================================
+
+export const NetworkReadinessStateSchema = z.enum([
+  'STARTING',
+  'OFFLINE',
+  'CONNECTING',
+  'ONLINE',
+  'DEGRADED',
+  'ERROR',
+]);
+export type NetworkReadinessState = z.infer<typeof NetworkReadinessStateSchema>;
+
+export const NetworkInterfaceTypeSchema = z.string().default('none');
+export type NetworkInterfaceType = z.infer<typeof NetworkInterfaceTypeSchema>;
+
+export const StartupHealthCheckResultSchema = z.object({
+  state: NetworkReadinessStateSchema.default('STARTING'),
+  localReady: z.boolean().default(true),
+  networkAvailable: z.boolean().default(false),
+  internetReachable: z.boolean().default(false),
+  latencyMs: z.number().nullable().default(null),
+  activeInterface: z.string().default('none'),
+  dnsResponsive: z.boolean().default(false),
+  windowsAutoStartEnabled: z.boolean().default(false),
+  offlineBannerMessage: z.string().nullable().default("You're offline. Local features are still available."),
+  timestamp: z.string().datetime().default(() => new Date().toISOString()),
+});
+export type StartupHealthCheckResult = z.infer<typeof StartupHealthCheckResultSchema>;
+
+export const WifiSecurityTypeSchema = z.enum(['open', 'wpa', 'wpa2', 'wpa3', 'wpa2_wpa3', 'enterprise', 'unknown']);
+export type WifiSecurityType = z.infer<typeof WifiSecurityTypeSchema>;
+
+export const WifiNetworkSchema = z.object({
+  ssid: z.string().min(1),
+  bssid: z.string().optional(),
+  signalPercent: z.number().int().min(0).max(100).default(100),
+  security: WifiSecurityTypeSchema.default('wpa2'),
+  inRange: z.boolean().default(true),
+  isCurrent: z.boolean().default(false),
+});
+export type WifiNetwork = z.infer<typeof WifiNetworkSchema>;
+
+export const WifiConnectRequestSchema = z.object({
+  ssid: z.string().min(1),
+  password: z.string().optional(),
+  hidden: z.boolean().default(false),
+});
+export type WifiConnectRequest = z.infer<typeof WifiConnectRequestSchema>;
+
+export const WifiConnectErrorCodeSchema = z.enum([
+  'invalid_credentials',
+  'permission_denied',
+  'network_not_found',
+  'timeout',
+  'os_error',
+]);
+export type WifiConnectErrorCode = z.infer<typeof WifiConnectErrorCodeSchema>;
+
+export const WifiConnectResultSchema = z.object({
+  success: z.boolean(),
+  ssid: z.string(),
+  errorCode: WifiConnectErrorCodeSchema.optional(),
+  message: z.string(),
+  connectedAt: z.string().datetime().optional(),
+});
+export type WifiConnectResult = z.infer<typeof WifiConnectResultSchema>;
+
+export const AutoStartConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  appName: z.string().default('ALINA'),
+  executablePath: z.string().optional(),
+  args: z.array(z.string()).default([]),
+  startMinimized: z.boolean().default(true),
+  launchDelaySeconds: z.number().int().nonnegative().default(0),
+});
+export type AutoStartConfig = z.infer<typeof AutoStartConfigSchema>;
+
 

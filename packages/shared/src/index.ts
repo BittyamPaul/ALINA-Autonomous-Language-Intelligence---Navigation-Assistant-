@@ -10,4 +10,5 @@ export * from './browser-types';
 export * from './native-ipc';
 export * from './telemetry';
 export * from './logging';
+export * from './security/wifi-credential-guard';
 export { z } from 'zod';
