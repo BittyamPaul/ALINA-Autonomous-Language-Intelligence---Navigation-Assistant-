@@ -1,4 +1,5 @@
 import { z } from 'zod';
+export { fromCanonicalTaskState, toCanonicalTaskState } from '@alina/shared';
 
 // Helper to ensure sensitive secret keys are never present
 const NoSecretsSchema = z.record(z.unknown()).refine(
@@ -62,6 +63,103 @@ export type MessageEntity = z.infer<typeof MessageSchema>;
 export const TaskRiskLevelSchema = z.enum(['READ_ONLY', 'LOW', 'MEDIUM', 'HIGH_DESTRUCTIVE']);
 export type TaskRiskLevel = z.infer<typeof TaskRiskLevelSchema>;
 
+export const CanonicalTaskStateSchema = z.enum([
+  'CREATED',
+  'PLANNING',
+  'READY',
+  'RUNNING',
+  'WAITING_FOR_APPROVAL',
+  'WAITING_FOR_NETWORK',
+  'RETRYING',
+  'VERIFYING',
+  'COMPLETED',
+  'FAILED',
+  'CANCELLED',
+]);
+export type CanonicalTaskState = z.infer<typeof CanonicalTaskStateSchema>;
+
+export const FailureKindSchema = z.enum([
+  'TRANSIENT',
+  'PERMANENT',
+  'USER_ACTION_REQUIRED',
+  'PERMISSION_REQUIRED',
+  'NETWORK_REQUIRED',
+  'UNKNOWN',
+]);
+export type FailureKind = z.infer<typeof FailureKindSchema>;
+
+export const FailureClassificationSchema = z.object({
+  kind: FailureKindSchema,
+  reason: z.string(),
+  retryable: z.boolean(),
+  suggestedRecovery: z.string().optional(),
+  failedStepId: z.string().optional(),
+  details: z.unknown().optional(),
+});
+export type FailureClassification = z.infer<typeof FailureClassificationSchema>;
+
+export const TaskRetryPolicySchema = z.object({
+  maxRetries: z.number().int().min(0).default(3),
+  initialDelayMs: z.number().int().min(0).default(1000),
+  maxDelayMs: z.number().int().min(0).default(30000),
+  backoffMultiplier: z.number().min(1).default(2),
+  jitter: z.boolean().default(true),
+});
+export type TaskRetryPolicy = z.infer<typeof TaskRetryPolicySchema>;
+
+export const TaskTimeoutConfigSchema = z.object({
+  taskTimeoutMs: z.number().int().min(1000).default(300000),
+  stepTimeoutMs: z.number().int().min(500).default(60000),
+  planningTimeoutMs: z.number().int().min(500).default(30000),
+  retryTimeoutMs: z.number().int().min(500).default(30000),
+});
+export type TaskTimeoutConfig = z.infer<typeof TaskTimeoutConfigSchema>;
+
+export const TaskCancellationStateSchema = z.object({
+  isCancelled: z.boolean().default(false),
+  cancelledAt: z.string().datetime().optional(),
+  cancelledBy: z.enum(['user', 'watchdog', 'system', 'dependency_failure']).optional(),
+  reason: z.string().optional(),
+});
+export type TaskCancellationState = z.infer<typeof TaskCancellationStateSchema>;
+
+export const TaskRecoveryStrategyTypeSchema = z.enum([
+  'AUTO_RETRY',
+  'VERIFY_IDEMPOTENT_THEN_RESUME',
+  'PAUSE_FOR_NETWORK',
+  'PAUSE_FOR_APPROVAL',
+  'ESCALATE_TO_USER',
+  'FAIL_FAST',
+]);
+export type TaskRecoveryStrategyType = z.infer<typeof TaskRecoveryStrategyTypeSchema>;
+
+export const TaskRecoveryStrategySchema = z.object({
+  type: TaskRecoveryStrategyTypeSchema.default('AUTO_RETRY'),
+  description: z.string().default('Default automated retry and checkpoint recovery strategy'),
+  maxAttempts: z.number().int().min(0).default(3),
+  fallbackPlanId: z.string().optional(),
+  parameters: z.record(z.unknown()).optional(),
+});
+export type TaskRecoveryStrategy = z.infer<typeof TaskRecoveryStrategySchema>;
+
+export const VerificationCriteriaSchema = z.object({
+  postConditions: z.array(z.record(z.unknown())).default([]),
+  customRule: z.string().optional(),
+  expectedState: z.record(z.unknown()).optional(),
+  idempotencyKey: z.string().optional(),
+});
+export type VerificationCriteria = z.infer<typeof VerificationCriteriaSchema>;
+
+export const TaskFinalStateSchema = z.object({
+  status: CanonicalTaskStateSchema,
+  summary: z.string(),
+  failure: FailureClassificationSchema.optional(),
+  completedAt: z.string().datetime().optional(),
+  durationMs: z.number().optional(),
+  stepsExecuted: z.number().int().nonnegative().default(0),
+});
+export type TaskFinalState = z.infer<typeof TaskFinalStateSchema>;
+
 export const TaskStatusSchema = z.enum([
   'pending',
   'planning',
@@ -75,6 +173,17 @@ export const TaskStatusSchema = z.enum([
   'executing',
   'awaiting_approval',
   'paused',
+  'CREATED',
+  'PLANNING',
+  'READY',
+  'RUNNING',
+  'WAITING_FOR_APPROVAL',
+  'WAITING_FOR_NETWORK',
+  'RETRYING',
+  'VERIFYING',
+  'COMPLETED',
+  'FAILED',
+  'CANCELLED',
 ]);
 export type TaskStatus = z.infer<typeof TaskStatusSchema>;
 
@@ -84,8 +193,18 @@ export const TaskSchema = z.object({
   workspaceId: z.string(),
   conversationId: z.string().optional(),
   status: TaskStatusSchema.default('draft'),
+  canonicalState: CanonicalTaskStateSchema.default('CREATED').optional(),
   riskLevel: TaskRiskLevelSchema.default('LOW'),
   plan: z.record(z.unknown()).optional(),
+  currentStepId: z.string().optional(),
+  currentStepIndex: z.number().int().nonnegative().optional(),
+  dependencies: z.array(z.string()).default([]).optional(),
+  retryPolicy: TaskRetryPolicySchema.default(() => TaskRetryPolicySchema.parse({})).optional(),
+  timeout: TaskTimeoutConfigSchema.default(() => TaskTimeoutConfigSchema.parse({})).optional(),
+  cancellation: TaskCancellationStateSchema.default(() => TaskCancellationStateSchema.parse({})).optional(),
+  recoveryStrategy: TaskRecoveryStrategySchema.default(() => TaskRecoveryStrategySchema.parse({})).optional(),
+  verificationCriteria: VerificationCriteriaSchema.default(() => VerificationCriteriaSchema.parse({})).optional(),
+  finalState: TaskFinalStateSchema.optional(),
   resultSummary: z.string().optional(),
   createdAt: z.string().datetime().default(() => new Date().toISOString()),
   updatedAt: z.string().datetime().default(() => new Date().toISOString()),
@@ -110,6 +229,7 @@ export const TaskStepSchema = z.object({
   title: z.string().min(1),
   toolName: z.string().min(1),
   parameters: NoSecretsSchema.default({}),
+  dependencies: z.array(z.string()).default([]).optional(),
   status: StepStatusSchema.default('pending'),
   riskLevel: TaskRiskLevelSchema.default('LOW'),
   verificationRule: z.record(z.unknown()).optional(),
@@ -119,6 +239,32 @@ export const TaskStepSchema = z.object({
   completedAt: z.string().datetime().optional(),
 });
 export type TaskStepEntity = z.infer<typeof TaskStepSchema>;
+
+// 6b. Task Checkpoint Entity
+export const TaskCheckpointSchema = z.object({
+  id: z.string(),
+  taskId: z.string(),
+  stepIndex: z.number().int().nonnegative(),
+  stepId: z.string(),
+  state: CanonicalTaskStateSchema,
+  action: z.object({
+    toolName: z.string(),
+    parameters: NoSecretsSchema.default({}),
+    parametersHash: z.string(),
+    isSideEffecting: z.boolean().default(false),
+  }),
+  preConditionsVerified: z.boolean().default(true).optional(),
+  postConditionsExpected: z.array(z.record(z.unknown())).default([]).optional(),
+  postConditionsVerified: z.boolean().optional(),
+  executionResult: z.object({
+    success: z.boolean(),
+    data: z.unknown().optional(),
+    error: z.string().optional(),
+  }).optional(),
+  stateSnapshot: z.record(z.unknown()).optional(),
+  createdAt: z.string().datetime().default(() => new Date().toISOString()),
+});
+export type TaskCheckpointEntity = z.infer<typeof TaskCheckpointSchema>;
 
 // 7. Agent Run Entity
 export const AgentRunSchema = z.object({

@@ -1,6 +1,14 @@
 import * as fs from 'fs/promises';
 import {
   TaskStatus,
+  CanonicalTaskState,
+  FailureClassification,
+  TaskRetryPolicy,
+  TaskTimeoutConfig,
+  TaskRecoveryStrategy,
+  VerificationCriteria,
+  toCanonicalTaskState,
+  fromCanonicalTaskState,
   AgentEventEnvelope,
   PathJail,
   AuditLogger,
@@ -13,6 +21,7 @@ import {
 } from '@alina/shared';
 import { ToolRegistry, ToolExecutionContext } from '@alina/tools';
 import { AlinaMcpToolRegistry, McpToolContext } from '@alina/mcp';
+import { TaskCheckpointRepository, TaskCheckpointEntity } from '@alina/database';
 import { AgentConfig, DEFAULT_AGENT_CONFIG } from './agent-config';
 import { ModelAdapter, MastraModelAdapter } from './model-abstraction';
 import { MastraToolRegistrationBridge } from './mastra-tool-adapter';
@@ -30,6 +39,12 @@ import { AlinaResearchAgent, ResearchSynthesisResult } from './multiagent/resear
 import { AlinaDocumentAgent, DocumentOutputData } from './multiagent/document-agent';
 import { AlinaBrowserAgent, BrowserSourceReference } from './browser-agent';
 import { AlinaPersonalAdaptationEngine } from './adaptation';
+import {
+  TaskWatchdog,
+  IdempotencyGuard,
+  FailureClassifier,
+  TaskRecoveryEngine,
+} from './execution';
 
 export interface SupervisorExecutionOptions {
   taskId?: string;
@@ -44,6 +59,13 @@ export interface SupervisorExecutionOptions {
   forceDirect?: boolean;
   forceDelegate?: boolean;
   modality?: 'text' | 'voice';
+  canonicalState?: CanonicalTaskState;
+  retryPolicy?: Partial<TaskRetryPolicy>;
+  timeout?: Partial<TaskTimeoutConfig>;
+  recoveryStrategy?: Partial<TaskRecoveryStrategy>;
+  verificationCriteria?: Partial<VerificationCriteria>;
+  dependencies?: string[];
+  abortController?: AbortController;
   onProgress?: (event: AgentEventEnvelope) => void;
 }
 
@@ -51,11 +73,14 @@ export interface SupervisorExecutionResult {
   taskId: string;
   goal: string;
   status: TaskStatus;
+  canonicalState?: CanonicalTaskState;
   resultSummary: string;
   durationMs: number;
   stepsCompleted: number;
   toolCallsCount: number;
   error?: string;
+  failure?: FailureClassification;
+  checkpointCount?: number;
   approvalRequest?: ApprovalRequest;
   subagentResults?: StructuredTaskResult[];
   delegated?: boolean;
@@ -95,6 +120,9 @@ export class AlinaSupervisorAgent {
   private cancelledTasks: Set<string> = new Set();
   private observabilityService: AlinaObservabilityService;
   private adaptationEngine?: AlinaPersonalAdaptationEngine;
+  private watchdog: TaskWatchdog;
+  private checkpointRepo?: TaskCheckpointRepository;
+  private recoveryEngine?: TaskRecoveryEngine;
 
   constructor(options: {
     config?: Partial<AgentConfig>;
@@ -113,6 +141,9 @@ export class AlinaSupervisorAgent {
     documentAgent?: AlinaDocumentAgent;
     browserAgent?: AlinaBrowserAgent;
     adaptationEngine?: AlinaPersonalAdaptationEngine;
+    watchdog?: TaskWatchdog;
+    checkpointRepo?: TaskCheckpointRepository;
+    recoveryEngine?: TaskRecoveryEngine;
   }) {
     this.config = { ...DEFAULT_AGENT_CONFIG, ...options.config };
     this.modelAdapter = options.modelAdapter ?? new MastraModelAdapter(this.config);
@@ -128,6 +159,19 @@ export class AlinaSupervisorAgent {
     this.memoryService = options.memoryService;
     this.authorizationManager = options.authorizationManager;
     this.adaptationEngine = options.adaptationEngine;
+
+    // Resilient Task Execution Engine components
+    this.watchdog = options.watchdog || new TaskWatchdog();
+    this.checkpointRepo =
+      options.checkpointRepo ||
+      (typeof this.taskService?.getCheckpointRepository === 'function'
+        ? this.taskService.getCheckpointRepository()
+        : new TaskCheckpointRepository());
+    this.recoveryEngine =
+      options.recoveryEngine ||
+      (typeof this.taskService?.getTaskRepository === 'function' && this.checkpointRepo
+        ? new TaskRecoveryEngine(this.taskService.getTaskRepository(), this.checkpointRepo)
+        : undefined);
 
     // Initialize specialized subagents and task delegator
     this.delegator = options.delegator || new TaskDelegator({
@@ -192,8 +236,21 @@ export class AlinaSupervisorAgent {
     }
   }
 
+  public getWatchdog(): TaskWatchdog {
+    return this.watchdog;
+  }
+
+  public getRecoveryEngine(): TaskRecoveryEngine | undefined {
+    return this.recoveryEngine;
+  }
+
+  public getCheckpointRepository(): TaskCheckpointRepository | undefined {
+    return this.checkpointRepo;
+  }
+
   public cancel(taskId: string): void {
     this.cancelledTasks.add(taskId);
+    this.watchdog.unregister(taskId);
   }
 
   /**
@@ -207,9 +264,26 @@ export class AlinaSupervisorAgent {
 
     const jail = new PathJail({ allowedRoots: [jailRoot] });
     const auditLogger = new AuditLogger();
-    let currentStatus: TaskStatus = 'pending';
+    let currentCanonicalState: CanonicalTaskState = options.canonicalState ?? 'CREATED';
+    let currentStatus: TaskStatus = fromCanonicalTaskState(currentCanonicalState);
     let stepsCompleted = 0;
     let toolCallsCount = 0;
+    let checkpointsSavedCount = 0;
+
+    const retryPolicy: TaskRetryPolicy = {
+      maxRetries: options.retryPolicy?.maxRetries ?? 3,
+      initialDelayMs: options.retryPolicy?.initialDelayMs ?? 1000,
+      maxDelayMs: options.retryPolicy?.maxDelayMs ?? 30000,
+      backoffMultiplier: options.retryPolicy?.backoffMultiplier ?? 2,
+      jitter: options.retryPolicy?.jitter ?? true,
+    };
+
+    const timeoutConfig: TaskTimeoutConfig = {
+      taskTimeoutMs: options.timeout?.taskTimeoutMs ?? 300000,
+      stepTimeoutMs: options.timeout?.stepTimeoutMs ?? 60000,
+      planningTimeoutMs: options.timeout?.planningTimeoutMs ?? 30000,
+      retryTimeoutMs: options.timeout?.retryTimeoutMs ?? 30000,
+    };
 
     // Helper: emit human-readable progress event (no chain-of-thought leaked)
     const emitProgress = (
@@ -234,24 +308,80 @@ export class AlinaSupervisorAgent {
 
     // Helper: persist task status update to SurrealDB
     const persistTaskState = async (
-      status: TaskStatus,
-      resultSummary?: string
+      statusOrCanonical: TaskStatus | CanonicalTaskState,
+      resultSummary?: string,
+      patch?: Record<string, unknown>
     ): Promise<void> => {
-      currentStatus = status;
+      currentCanonicalState = toCanonicalTaskState(statusOrCanonical);
+      currentStatus = fromCanonicalTaskState(currentCanonicalState);
       if (this.taskService) {
         try {
-          await this.taskService.updateStatus(taskId, {
-            status,
+          await this.taskService.updateCanonicalState(taskId, currentCanonicalState, {
             resultSummary,
+            ...patch,
           });
         } catch {
-          // Non-blocking fallback for standalone or in-memory tests
+          try {
+            await this.taskService.updateStatus(taskId, {
+              status: currentStatus,
+              resultSummary,
+            });
+          } catch {
+            // Non-blocking fallback for standalone or in-memory tests
+          }
         }
       }
     };
 
+    // Helper: persist task checkpoint to SurrealDB after each meaningful step
+    const persistTaskCheckpoint = async (
+      stepIndex: number,
+      stepId: string,
+      state: CanonicalTaskState,
+      action: { toolName: string; parameters: Record<string, unknown>; isSideEffecting?: boolean },
+      postConditionsExpected: any[] = [],
+      executionResult?: { success: boolean; data?: unknown; error?: string },
+      postConditionsVerified?: boolean
+    ): Promise<TaskCheckpointEntity | null> => {
+      const isSide = action.isSideEffecting ?? IdempotencyGuard.isSideEffecting(action.toolName);
+      const checkpoint: TaskCheckpointEntity = {
+        id: `chk_${taskId}_${stepIndex}_${state.toLowerCase()}_${Date.now()}`,
+        taskId,
+        stepIndex,
+        stepId,
+        state,
+        action: {
+          toolName: action.toolName,
+          parameters: action.parameters,
+          parametersHash: IdempotencyGuard.computeParametersHash(action.parameters),
+          isSideEffecting: isSide,
+        },
+        preConditionsVerified: true,
+        postConditionsExpected,
+        postConditionsVerified,
+        executionResult,
+        createdAt: new Date().toISOString(),
+      };
+
+      checkpointsSavedCount++;
+      if (this.checkpointRepo) {
+        try {
+          return await this.checkpointRepo.saveCheckpoint(checkpoint);
+        } catch {
+          // Fallback
+        }
+      } else if (this.taskService) {
+        try {
+          return await this.taskService.saveCheckpoint(checkpoint);
+        } catch {
+          // Fallback
+        }
+      }
+      return checkpoint;
+    };
+
     // ----------------------------------------------------
-    // STAGE 0: Initialize & Persist Pending Task
+    // STAGE 0: Initialize & Persist Pending Task (CREATED)
     // ----------------------------------------------------
     emitProgress(`Task initialized: "${options.goal}"`, 'step:progress');
     if (this.taskService) {
@@ -261,17 +391,22 @@ export class AlinaSupervisorAgent {
           goal: options.goal,
           workspaceId,
           conversationId: options.sessionId,
-        });
+          status: 'draft',
+          canonicalState: 'CREATED',
+          retryPolicy,
+          timeout: timeoutConfig,
+        } as any);
       } catch {
         // Continue if already pre-created
       }
     }
-    await persistTaskState('pending');
+    await persistTaskState('CREATED');
 
     // ----------------------------------------------------
     // STAGE 1: UNDERSTAND
     // ----------------------------------------------------
     if (this.isCancelled(taskId)) {
+      this.watchdog.unregister(taskId);
       return this.handleCancelled(taskId, options.goal, startTime, stepsCompleted, toolCallsCount);
     }
     emitProgress('Understanding objective and verifying execution constraints...');
@@ -279,12 +414,21 @@ export class AlinaSupervisorAgent {
     // ----------------------------------------------------
     // STAGE 2: PLAN & SELECTIVE DELEGATION EVALUATION
     // ----------------------------------------------------
-    await persistTaskState('planning');
+    await persistTaskState('PLANNING');
+    this.watchdog.register(taskId, 'PLANNING', {
+      abortController: options.abortController,
+      customTimeoutMs: timeoutConfig.planningTimeoutMs,
+      onTimeout: async (_tid, _st, reason) => {
+        await persistTaskState('FAILED', reason);
+        emitProgress(`Watchdog timeout: ${reason}`, 'task:failed');
+      },
+    });
     emitProgress('Formulating structured execution plan...');
 
     // Evaluate if delegation provides real benefit over direct atomic execution
     const delegationDecision = this.shouldDelegate(options.goal);
     if (!options.forceDirect && (delegationDecision.delegate || options.forceDelegate)) {
+      this.watchdog.unregister(taskId);
       emitProgress(
         `Multi-agent delegation selected: ${delegationDecision.reason} (Pipeline: ${delegationDecision.pipeline.join(' → ')})`,
         'step:progress'
@@ -354,7 +498,11 @@ export class AlinaSupervisorAgent {
       modelResult = await this.modelAdapter.generate(options.goal, modelContext);
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
-      await persistTaskState('failed', `Planning failed: ${errorMsg}`);
+      this.watchdog.unregister(taskId);
+      const failureClassification = FailureClassifier.classify(err, { attempt: 0, maxAttempts: 1 });
+      const diagnosticSummary = `Unable to plan task: ${errorMsg}. Failure kind: ${failureClassification.kind}.`;
+
+      await persistTaskState('FAILED', diagnosticSummary);
       emitProgress(`Planning error: ${errorMsg}`, 'task:failed');
       this.observabilityService.recordFailure({
         taskId,
@@ -374,21 +522,27 @@ export class AlinaSupervisorAgent {
         taskId,
         goal: options.goal,
         status: 'failed',
-        resultSummary: `Unable to plan task: ${errorMsg}`,
+        canonicalState: 'FAILED',
+        resultSummary: diagnosticSummary,
+        failure: failureClassification,
         durationMs: Date.now() - startTime,
         stepsCompleted: 0,
         toolCallsCount: 0,
         error: errorMsg,
+        checkpointCount: checkpointsSavedCount,
       };
     }
 
     const toolCalls = modelResult.toolCalls ?? [];
+    this.watchdog.transitionState(taskId, 'READY');
+    await persistTaskState('READY');
     emitProgress(`Generated plan with ${toolCalls.length} atomic tool step(s).`, 'task:plan_ready');
 
     // ----------------------------------------------------
     // STAGES 3–7: TOOL EXECUTION & VERIFICATION LOOP
     // ----------------------------------------------------
-    await persistTaskState('running');
+    this.watchdog.transitionState(taskId, 'RUNNING');
+    await persistTaskState('RUNNING');
     const stepOutputs: Array<{ toolName: string; output: unknown }> = [];
 
     let stepIndex = 0;
@@ -396,7 +550,10 @@ export class AlinaSupervisorAgent {
       stepIndex++;
       const stepId = `step_${stepIndex}`;
 
+      this.watchdog.heartbeat(taskId);
+
       if (this.isCancelled(taskId)) {
+        this.watchdog.unregister(taskId);
         return this.handleCancelled(taskId, options.goal, startTime, stepsCompleted, toolCallsCount);
       }
 
@@ -410,16 +567,21 @@ export class AlinaSupervisorAgent {
       if (!mcpDef && !legacyDef) {
         const errorMsg = `Security violation: Tool "${stepCall.toolName}" is not registered in ALINA's tool system.`;
         emitProgress(`Execution halted: ${errorMsg}`, 'step:failed', stepId);
-        await persistTaskState('failed', errorMsg);
+        const classification = FailureClassifier.classify(errorMsg, { toolName: stepCall.toolName });
+        await persistTaskState('FAILED', errorMsg);
+        this.watchdog.unregister(taskId);
         return {
           taskId,
           goal: options.goal,
           status: 'failed',
+          canonicalState: 'FAILED',
           resultSummary: errorMsg,
+          failure: classification,
           durationMs: Date.now() - startTime,
           stepsCompleted,
           toolCallsCount,
           error: errorMsg,
+          checkpointCount: checkpointsSavedCount,
         };
       }
 
@@ -453,27 +615,85 @@ export class AlinaSupervisorAgent {
           decision: 'awaiting_approval',
         });
 
-        await persistTaskState('waiting_for_approval');
+        const isSide = IdempotencyGuard.isSideEffecting(stepCall.toolName);
+        await persistTaskState('WAITING_FOR_APPROVAL');
+        await persistTaskCheckpoint(
+          stepIndex,
+          stepId,
+          'WAITING_FOR_APPROVAL',
+          { toolName: stepCall.toolName, parameters: stepCall.parameters, isSideEffecting: isSide },
+          [],
+          { success: false, error: 'Awaiting human operator approval' }
+        );
+        this.watchdog.unregister(taskId);
         emitProgress(`Action requires human operator approval. Pausing task.`, 'step:awaiting_approval', stepId);
         return {
           taskId,
           goal: options.goal,
           status: 'waiting_for_approval',
+          canonicalState: 'WAITING_FOR_APPROVAL',
           resultSummary: `Execution paused awaiting approval for tool "${stepCall.toolName}": ${approvalReq.parametersSummary}`,
           durationMs: Date.now() - startTime,
           stepsCompleted,
           toolCallsCount,
+          checkpointCount: checkpointsSavedCount,
           approvalRequest: approvalReq,
         };
       }
 
-      // STAGE 4: EXECUTE & STAGE 6: RE-PLAN (Self-Healing Loop up to 3 retries)
+      // ----------------------------------------------------
+      // IDEMPOTENCY GUARD: NEVER BLINDLY REPEAT A SIDE EFFECT
+      // ----------------------------------------------------
+      const isSide = IdempotencyGuard.isSideEffecting(stepCall.toolName);
+      if (isSide) {
+        const idempotencyCheck = await IdempotencyGuard.verifyPostConditionAlreadyMet({
+          toolName: stepCall.toolName,
+          parameters: stepCall.parameters,
+          jail,
+        });
+
+        if (idempotencyCheck.satisfied) {
+          emitProgress(
+            `[Idempotency Guard] Action for step ${stepIndex} ("${stepCall.toolName}") already satisfied in environment (${idempotencyCheck.reason}). Skipping redundant mutation.`,
+            'step:progress',
+            stepId
+          );
+          await persistTaskState('VERIFYING');
+          await persistTaskCheckpoint(
+            stepIndex,
+            stepId,
+            'VERIFYING',
+            { toolName: stepCall.toolName, parameters: stepCall.parameters, isSideEffecting: isSide },
+            [],
+            { success: true, data: { alreadySatisfied: true, reason: idempotencyCheck.reason } },
+            true
+          );
+          stepsCompleted++;
+          stepOutputs.push({
+            toolName: stepCall.toolName,
+            output: { alreadySatisfied: true, reason: idempotencyCheck.reason },
+          });
+          emitProgress(`Step ${stepId} verified from existing state.`, 'step:completed', stepId);
+          continue;
+        }
+      }
+
+      // Persist checkpoint for starting execution of this step
+      await persistTaskCheckpoint(
+        stepIndex,
+        stepId,
+        'RUNNING',
+        { toolName: stepCall.toolName, parameters: stepCall.parameters, isSideEffecting: isSide }
+      );
+
+      // STAGE 4: EXECUTE & STAGE 6: RE-PLAN (Bounded Retries & Exponential Backoff)
       let executionSuccess = false;
       let lastError = '';
       let retryCount = 0;
-      const MAX_RETRIES = 3;
+      const MAX_RETRIES = retryPolicy.maxRetries;
 
       while (!executionSuccess && retryCount < MAX_RETRIES) {
+        this.watchdog.heartbeat(taskId);
         emitProgress(`Executing tool "${stepCall.toolName}" (attempt ${retryCount + 1}/${MAX_RETRIES})...`, 'step:progress', stepId);
 
         const toolStart = Date.now();
@@ -531,8 +751,117 @@ export class AlinaSupervisorAgent {
         } else {
           lastError = execResult.error ?? 'Unknown tool error';
           retryCount++;
-          if (retryCount < MAX_RETRIES) {
-            emitProgress(`Transient failure in "${stepCall.toolName}": ${lastError}. Formulating recovery strategy...`, 'step:recovery_attempt', stepId);
+
+          // Classify failure into 6 canonical categories
+          const classification = FailureClassifier.classify(lastError, {
+            toolName: stepCall.toolName,
+            attempt: retryCount,
+            maxAttempts: MAX_RETRIES,
+          });
+
+          // Check if post-condition was achieved despite error (e.g. timeout on finished write)
+          if (isSide) {
+            const postErrCheck = await IdempotencyGuard.verifyPostConditionAlreadyMet({
+              toolName: stepCall.toolName,
+              parameters: stepCall.parameters,
+              jail,
+            });
+            if (postErrCheck.satisfied) {
+              executionSuccess = true;
+              stepOutputs.push({
+                toolName: stepCall.toolName,
+                output: { satisfiedAfterError: true, reason: postErrCheck.reason },
+              });
+              emitProgress(`Tool reported error but post-condition was satisfied: ${postErrCheck.reason}`, 'step:progress', stepId);
+              break;
+            }
+          }
+
+          // Case: Network connectivity required
+          if (classification.kind === 'NETWORK_REQUIRED') {
+            await persistTaskState('WAITING_FOR_NETWORK', classification.reason);
+            await persistTaskCheckpoint(
+              stepIndex,
+              stepId,
+              'WAITING_FOR_NETWORK',
+              { toolName: stepCall.toolName, parameters: stepCall.parameters, isSideEffecting: isSide },
+              [],
+              { success: false, error: lastError }
+            );
+            this.watchdog.unregister(taskId);
+            emitProgress(`Network required: ${classification.reason}. Pausing task.`, 'step:progress', stepId);
+            return {
+              taskId,
+              goal: options.goal,
+              status: 'waiting_for_approval',
+              canonicalState: 'WAITING_FOR_NETWORK',
+              resultSummary: classification.reason,
+              failure: classification,
+              durationMs: Date.now() - startTime,
+              stepsCompleted,
+              toolCallsCount,
+              error: lastError,
+              checkpointCount: checkpointsSavedCount,
+            };
+          }
+
+          // Case: Permission required
+          if (classification.kind === 'PERMISSION_REQUIRED') {
+            await persistTaskState('WAITING_FOR_APPROVAL', classification.reason);
+            await persistTaskCheckpoint(
+              stepIndex,
+              stepId,
+              'WAITING_FOR_APPROVAL',
+              { toolName: stepCall.toolName, parameters: stepCall.parameters, isSideEffecting: isSide },
+              [],
+              { success: false, error: lastError }
+            );
+            this.watchdog.unregister(taskId);
+            return {
+              taskId,
+              goal: options.goal,
+              status: 'waiting_for_approval',
+              canonicalState: 'WAITING_FOR_APPROVAL',
+              resultSummary: classification.reason,
+              failure: classification,
+              durationMs: Date.now() - startTime,
+              stepsCompleted,
+              toolCallsCount,
+              error: lastError,
+              checkpointCount: checkpointsSavedCount,
+            };
+          }
+
+          // Case: Transient or retryable failure with retries remaining
+          if (classification.retryable && retryCount < MAX_RETRIES) {
+            await persistTaskState(
+              'RETRYING',
+              `Retryable error in "${stepCall.toolName}": ${lastError}. Retrying (attempt ${retryCount}/${MAX_RETRIES})...`
+            );
+            this.watchdog.transitionState(taskId, 'RETRYING');
+            await persistTaskCheckpoint(
+              stepIndex,
+              stepId,
+              'RETRYING',
+              { toolName: stepCall.toolName, parameters: stepCall.parameters, isSideEffecting: isSide },
+              [],
+              { success: false, error: lastError }
+            );
+
+            // Exponential backoff calculation with jitter
+            const baseDelay = Math.min(
+              retryPolicy.maxDelayMs,
+              retryPolicy.initialDelayMs * Math.pow(retryPolicy.backoffMultiplier, retryCount - 1)
+            );
+            const backoffDelay = retryPolicy.jitter
+              ? Math.round(baseDelay * (0.8 + 0.4 * Math.random()))
+              : baseDelay;
+
+            emitProgress(
+              `Retryable failure in "${stepCall.toolName}": ${lastError}. Backoff ${backoffDelay}ms before retry...`,
+              'step:recovery_attempt',
+              stepId
+            );
             this.observabilityService.recordRetry({
               taskId,
               stepOrTool: stepCall.toolName,
@@ -540,17 +869,43 @@ export class AlinaSupervisorAgent {
               maxAttempts: MAX_RETRIES,
               reason: lastError,
             });
+
+            await new Promise((r) => setTimeout(r, backoffDelay));
+            this.watchdog.transitionState(taskId, 'RUNNING');
+          } else {
+            // Permanent error, unretryable condition, or max retries exhausted: fail fast
+            break;
           }
         }
       }
 
+      // If execution was unsuccessful after retries or permanent error:
+      // Never silently claim success! Produce honest explanation.
       if (!executionSuccess) {
-        const errorMsg = `Step ${stepId} failed after ${MAX_RETRIES} attempts: ${lastError}`;
-        emitProgress(errorMsg, 'step:failed', stepId);
-        await persistTaskState('failed', errorMsg);
+        const failureClassification = FailureClassifier.classify(lastError, {
+          toolName: stepCall.toolName,
+          attempt: retryCount,
+          maxAttempts: MAX_RETRIES,
+        });
+
+        const errorMsg = `Step ${stepId} failed after ${retryCount} attempts: ${lastError}`;
+        const honestExplanation = `Step ${stepId} ("${stepCall.toolName}") failed after ${retryCount} attempt(s). Classification: ${failureClassification.kind}. Reason: ${lastError}. Recovery is impossible without human intervention.`;
+
+        emitProgress(honestExplanation, 'step:failed', stepId);
+        await persistTaskState('FAILED', honestExplanation);
+        await persistTaskCheckpoint(
+          stepIndex,
+          stepId,
+          'FAILED',
+          { toolName: stepCall.toolName, parameters: stepCall.parameters, isSideEffecting: isSide },
+          [],
+          { success: false, error: lastError }
+        );
+        this.watchdog.unregister(taskId);
+
         this.observabilityService.recordFailure({
           taskId,
-          error: errorMsg,
+          error: honestExplanation,
           component: 'tool_executor',
           retryable: false,
         });
@@ -562,20 +917,34 @@ export class AlinaSupervisorAgent {
           stepsCompleted,
           toolCallsCount,
         });
+
         return {
           taskId,
           goal: options.goal,
           status: 'failed',
-          resultSummary: errorMsg,
+          canonicalState: 'FAILED',
+          resultSummary: honestExplanation,
+          failure: failureClassification,
           durationMs: Date.now() - startTime,
           stepsCompleted,
           toolCallsCount,
           error: errorMsg,
+          checkpointCount: checkpointsSavedCount,
         };
       }
 
       // STAGE 7: VERIFY
       emitProgress(`Verifying step ${stepId} post-conditions...`, 'step:verifying', stepId);
+      await persistTaskState('VERIFYING');
+      await persistTaskCheckpoint(
+        stepIndex,
+        stepId,
+        'VERIFYING',
+        { toolName: stepCall.toolName, parameters: stepCall.parameters, isSideEffecting: isSide },
+        [],
+        { success: true, data: stepOutputs[stepOutputs.length - 1]?.output },
+        true
+      );
       stepsCompleted++;
       emitProgress(`Step ${stepId} completed and verified.`, 'step:completed', stepId);
     }
@@ -584,7 +953,17 @@ export class AlinaSupervisorAgent {
     // STAGE 8: RESPOND & COMPLETE
     // ----------------------------------------------------
     const summary = this.generateHumanSummary(options.goal, stepOutputs, modelResult.text);
-    await persistTaskState('completed', summary);
+    await persistTaskState('COMPLETED', summary);
+    await persistTaskCheckpoint(
+      stepIndex,
+      'supervisor',
+      'COMPLETED',
+      { toolName: 'supervisor', parameters: {}, isSideEffecting: false },
+      [],
+      { success: true, data: summary },
+      true
+    );
+    this.watchdog.unregister(taskId);
     emitProgress(`Task completed successfully: ${summary}`, 'task:completed');
 
     const durationMs = Date.now() - startTime;
@@ -644,10 +1023,12 @@ export class AlinaSupervisorAgent {
       taskId,
       goal: options.goal,
       status: 'completed',
+      canonicalState: 'COMPLETED',
       resultSummary: summary,
       durationMs,
       stepsCompleted,
       toolCallsCount,
+      checkpointCount: checkpointsSavedCount,
     };
   }
 

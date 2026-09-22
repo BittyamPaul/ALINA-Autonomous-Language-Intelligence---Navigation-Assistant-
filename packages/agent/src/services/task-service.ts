@@ -3,11 +3,15 @@ import {
   AlinaDatabaseClient,
   TaskRepository,
   GraphRepository,
+  TaskCheckpointRepository,
   TaskRiskLevelSchema,
   TaskStatusSchema,
+  CanonicalTaskStateSchema,
   type TaskEntity,
   type TaskStepEntity,
   type TaskStatus,
+  type CanonicalTaskState,
+  type TaskCheckpointEntity,
 } from '@alina/database';
 import { AlinaServiceError } from './base-service';
 
@@ -111,5 +115,39 @@ export class TaskService {
       throw new AlinaServiceError(`Cannot update status: Task ${id} not found`, 'TASK_NOT_FOUND', 404);
     }
     return updated;
+  }
+
+  public async updateCanonicalState(
+    id: string,
+    state: CanonicalTaskState,
+    patch?: Partial<TaskEntity>
+  ): Promise<TaskEntity> {
+    const validatedState = CanonicalTaskStateSchema.parse(state);
+    const updated = await this.taskRepo.updateCanonicalState(id, validatedState, patch);
+
+    if (!updated) {
+      throw new AlinaServiceError(`Cannot update canonical state: Task ${id} not found`, 'TASK_NOT_FOUND', 404);
+    }
+    return updated;
+  }
+
+  public async saveCheckpoint(checkpoint: TaskCheckpointEntity): Promise<TaskCheckpointEntity> {
+    return this.taskRepo.getCheckpointRepository().saveCheckpoint(checkpoint);
+  }
+
+  public async getLatestCheckpoint(taskId: string): Promise<TaskCheckpointEntity | null> {
+    return this.taskRepo.getCheckpointRepository().getLatestCheckpoint(taskId);
+  }
+
+  public async getIncompleteTasks(): Promise<TaskEntity[]> {
+    return this.taskRepo.getIncompleteTasks();
+  }
+
+  public getTaskRepository(): TaskRepository {
+    return this.taskRepo;
+  }
+
+  public getCheckpointRepository(): TaskCheckpointRepository {
+    return this.taskRepo.getCheckpointRepository();
   }
 }

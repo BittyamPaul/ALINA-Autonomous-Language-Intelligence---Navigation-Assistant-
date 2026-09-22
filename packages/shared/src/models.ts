@@ -47,6 +47,7 @@ export const PlanStepSchema = z.object({
   parameters: z.record(z.unknown()),
   riskLevel: RiskLevelSchema,
   postCondition: PostConditionSchema.optional(),
+  dependencies: z.array(z.string()).default([]).optional(),
   status: StepStatusSchema.default('pending'),
   result: z.unknown().optional(),
   error: z.string().optional(),
@@ -72,6 +73,143 @@ export const PlanDAGSchema = z.object({
 });
 export type PlanDAG = z.infer<typeof PlanDAGSchema>;
 
+/**
+ * 11 Canonical Task States for ALINA High-Reliability Execution Engine
+ */
+export const CanonicalTaskStateSchema = z.enum([
+  'CREATED',
+  'PLANNING',
+  'READY',
+  'RUNNING',
+  'WAITING_FOR_APPROVAL',
+  'WAITING_FOR_NETWORK',
+  'RETRYING',
+  'VERIFYING',
+  'COMPLETED',
+  'FAILED',
+  'CANCELLED',
+]);
+export type CanonicalTaskState = z.infer<typeof CanonicalTaskStateSchema>;
+
+/**
+ * 6-Class Structured Failure Classification
+ */
+export const FailureKindSchema = z.enum([
+  'TRANSIENT',
+  'PERMANENT',
+  'USER_ACTION_REQUIRED',
+  'PERMISSION_REQUIRED',
+  'NETWORK_REQUIRED',
+  'UNKNOWN',
+]);
+export type FailureKind = z.infer<typeof FailureKindSchema>;
+
+export const FailureClassificationSchema = z.object({
+  kind: FailureKindSchema,
+  reason: z.string(),
+  retryable: z.boolean(),
+  suggestedRecovery: z.string().optional(),
+  failedStepId: z.string().optional(),
+  details: z.unknown().optional(),
+});
+export type FailureClassification = z.infer<typeof FailureClassificationSchema>;
+
+export const TaskRetryPolicySchema = z.object({
+  maxRetries: z.number().int().min(0).default(3),
+  initialDelayMs: z.number().int().min(0).default(1000),
+  maxDelayMs: z.number().int().min(0).default(30000),
+  backoffMultiplier: z.number().min(1).default(2),
+  jitter: z.boolean().default(true),
+});
+export type TaskRetryPolicy = z.infer<typeof TaskRetryPolicySchema>;
+
+export const TaskTimeoutConfigSchema = z.object({
+  taskTimeoutMs: z.number().int().min(1000).default(300000),
+  stepTimeoutMs: z.number().int().min(500).default(60000),
+  planningTimeoutMs: z.number().int().min(500).default(30000),
+  retryTimeoutMs: z.number().int().min(500).default(30000),
+});
+export type TaskTimeoutConfig = z.infer<typeof TaskTimeoutConfigSchema>;
+
+export const TaskCancellationStateSchema = z.object({
+  isCancelled: z.boolean().default(false),
+  cancelledAt: z.string().datetime().optional(),
+  cancelledBy: z.enum(['user', 'watchdog', 'system', 'dependency_failure']).optional(),
+  reason: z.string().optional(),
+});
+export type TaskCancellationState = z.infer<typeof TaskCancellationStateSchema>;
+
+export const TaskRecoveryStrategyTypeSchema = z.enum([
+  'AUTO_RETRY',
+  'VERIFY_IDEMPOTENT_THEN_RESUME',
+  'PAUSE_FOR_NETWORK',
+  'PAUSE_FOR_APPROVAL',
+  'ESCALATE_TO_USER',
+  'FAIL_FAST',
+]);
+export type TaskRecoveryStrategyType = z.infer<typeof TaskRecoveryStrategyTypeSchema>;
+
+export const TaskRecoveryStrategySchema = z.object({
+  type: TaskRecoveryStrategyTypeSchema.default('AUTO_RETRY'),
+  description: z.string().default('Default automated retry and checkpoint recovery strategy'),
+  maxAttempts: z.number().int().min(0).default(3),
+  fallbackPlanId: z.string().optional(),
+  parameters: z.record(z.unknown()).optional(),
+});
+export type TaskRecoveryStrategy = z.infer<typeof TaskRecoveryStrategySchema>;
+
+export const VerificationCriteriaSchema = z.object({
+  postConditions: z.array(PostConditionSchema).default([]),
+  customRule: z.string().optional(),
+  expectedState: z.record(z.unknown()).optional(),
+  idempotencyKey: z.string().optional(),
+});
+export type VerificationCriteria = z.infer<typeof VerificationCriteriaSchema>;
+
+export const TaskFinalStateSchema = z.object({
+  status: CanonicalTaskStateSchema,
+  summary: z.string(),
+  failure: FailureClassificationSchema.optional(),
+  completedAt: z.string().datetime().optional(),
+  durationMs: z.number().optional(),
+  stepsExecuted: z.number().int().nonnegative().default(0),
+});
+export type TaskFinalState = z.infer<typeof TaskFinalStateSchema>;
+
+export const CurrentStepTrackingSchema = z.object({
+  id: z.string(),
+  index: z.number().int().nonnegative(),
+  title: z.string(),
+  toolName: z.string().optional(),
+  startedAt: z.string().datetime().optional(),
+});
+export type CurrentStepTracking = z.infer<typeof CurrentStepTrackingSchema>;
+
+export const TaskCheckpointSchema = z.object({
+  id: z.string(),
+  taskId: z.string(),
+  stepIndex: z.number().int().nonnegative(),
+  stepId: z.string(),
+  state: CanonicalTaskStateSchema,
+  action: z.object({
+    toolName: z.string(),
+    parameters: z.record(z.unknown()).default({}),
+    parametersHash: z.string(),
+    isSideEffecting: z.boolean().default(false),
+  }),
+  preConditionsVerified: z.boolean().default(true).optional(),
+  postConditionsExpected: z.array(PostConditionSchema).default([]).optional(),
+  postConditionsVerified: z.boolean().optional(),
+  executionResult: z.object({
+    success: z.boolean(),
+    data: z.unknown().optional(),
+    error: z.string().optional(),
+  }).optional(),
+  stateSnapshot: z.record(z.unknown()).optional(),
+  createdAt: z.string().datetime().default(() => new Date().toISOString()),
+});
+export type TaskCheckpoint = z.infer<typeof TaskCheckpointSchema>;
+
 export const TaskStatusSchema = z.enum([
   'pending',
   'planning',
@@ -85,17 +223,101 @@ export const TaskStatusSchema = z.enum([
   'executing',
   'awaiting_approval',
   'paused',
+  'CREATED',
+  'PLANNING',
+  'READY',
+  'RUNNING',
+  'WAITING_FOR_APPROVAL',
+  'WAITING_FOR_NETWORK',
+  'RETRYING',
+  'VERIFYING',
+  'COMPLETED',
+  'FAILED',
+  'CANCELLED',
 ]);
 export type TaskStatus = z.infer<typeof TaskStatusSchema>;
+
+export function toCanonicalTaskState(status: string): CanonicalTaskState {
+  const upper = status.toUpperCase();
+  if (upper in CanonicalTaskStateSchema.Values) {
+    return upper as CanonicalTaskState;
+  }
+  switch (status.toLowerCase()) {
+    case 'pending':
+    case 'draft':
+      return 'CREATED';
+    case 'planning':
+      return 'PLANNING';
+    case 'ready':
+      return 'READY';
+    case 'running':
+    case 'executing':
+      return 'RUNNING';
+    case 'waiting_for_approval':
+    case 'awaiting_approval':
+      return 'WAITING_FOR_APPROVAL';
+    case 'waiting_for_network':
+      return 'WAITING_FOR_NETWORK';
+    case 'retrying':
+      return 'RETRYING';
+    case 'verifying':
+      return 'VERIFYING';
+    case 'completed':
+      return 'COMPLETED';
+    case 'failed':
+      return 'FAILED';
+    case 'cancelled':
+      return 'CANCELLED';
+    default:
+      return 'CREATED';
+  }
+}
+
+export function fromCanonicalTaskState(state: CanonicalTaskState): TaskStatus {
+  switch (state) {
+    case 'CREATED':
+      return 'draft';
+    case 'PLANNING':
+      return 'planning';
+    case 'READY':
+      return 'ready';
+    case 'RUNNING':
+      return 'running';
+    case 'WAITING_FOR_APPROVAL':
+      return 'waiting_for_approval';
+    case 'WAITING_FOR_NETWORK':
+      return 'waiting_for_approval';
+    case 'RETRYING':
+      return 'running';
+    case 'VERIFYING':
+      return 'running';
+    case 'COMPLETED':
+      return 'completed';
+    case 'FAILED':
+      return 'failed';
+    case 'CANCELLED':
+      return 'cancelled';
+  }
+}
 
 export const TaskSchema = z.object({
   id: z.string(),
   goal: z.string(),
   sessionId: z.string(),
   projectId: z.string().optional(),
+  workspaceId: z.string().optional(),
   status: TaskStatusSchema.default('draft'),
+  canonicalState: CanonicalTaskStateSchema.default('CREATED').optional(),
   plan: PlanDAGSchema.optional(),
+  currentStep: CurrentStepTrackingSchema.optional(),
   currentStepId: z.string().optional(),
+  dependencies: z.array(z.string()).default([]).optional(),
+  retryPolicy: TaskRetryPolicySchema.default(() => TaskRetryPolicySchema.parse({})).optional(),
+  timeout: TaskTimeoutConfigSchema.default(() => TaskTimeoutConfigSchema.parse({})).optional(),
+  cancellation: TaskCancellationStateSchema.default(() => TaskCancellationStateSchema.parse({})).optional(),
+  recoveryStrategy: TaskRecoveryStrategySchema.default(() => TaskRecoveryStrategySchema.parse({})).optional(),
+  verificationCriteria: VerificationCriteriaSchema.default(() => VerificationCriteriaSchema.parse({})).optional(),
+  finalState: TaskFinalStateSchema.optional(),
   resultSummary: z.string().optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),

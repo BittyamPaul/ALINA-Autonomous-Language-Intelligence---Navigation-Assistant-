@@ -7,17 +7,26 @@ import {
   ApprovalEntity,
   ApprovalSchema,
   TaskStatus,
+  CanonicalTaskState,
+  fromCanonicalTaskState,
 } from '../models/entities';
 import { AlinaDatabaseClient } from '../client';
+import { TaskCheckpointRepository } from './task-checkpoint-repo';
 
 export class TaskRepository extends BaseRepository<TaskEntity> {
   private stepRepo: BaseRepository<TaskStepEntity>;
   private approvalRepo: BaseRepository<ApprovalEntity>;
+  private checkpointRepo: TaskCheckpointRepository;
 
   constructor(client: AlinaDatabaseClient) {
     super(client, 'task', TaskSchema);
     this.stepRepo = new BaseRepository(client, 'task_step', TaskStepSchema);
     this.approvalRepo = new BaseRepository(client, 'approval', ApprovalSchema);
+    this.checkpointRepo = new TaskCheckpointRepository(client);
+  }
+
+  public getCheckpointRepository(): TaskCheckpointRepository {
+    return this.checkpointRepo;
   }
 
   public async createTaskWithSteps(
@@ -96,6 +105,42 @@ export class TaskRepository extends BaseRepository<TaskEntity> {
     return this.update(taskId, {
       status,
       updatedAt: new Date().toISOString(),
+    });
+  }
+
+  public async updateCanonicalState(
+    taskId: string,
+    state: CanonicalTaskState,
+    patch?: Partial<TaskEntity>
+  ): Promise<TaskEntity | null> {
+    return this.update(taskId, {
+      ...patch,
+      canonicalState: state,
+      status: fromCanonicalTaskState(state),
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  /**
+   * Retrieves all tasks that are currently in an active or non-terminal state.
+   */
+  public async getIncompleteTasks(): Promise<TaskEntity[]> {
+    const all = await this.list(500);
+    const terminalStates = new Set([
+      'COMPLETED',
+      'FAILED',
+      'CANCELLED',
+      'completed',
+      'failed',
+      'cancelled',
+    ]);
+
+    return all.filter((task) => {
+      const canonical = task.canonicalState;
+      const status = task.status;
+      const isCanonicalTerminal = canonical ? terminalStates.has(canonical) : false;
+      const isStatusTerminal = status ? terminalStates.has(status) : false;
+      return !isCanonicalTerminal && !isStatusTerminal;
     });
   }
 

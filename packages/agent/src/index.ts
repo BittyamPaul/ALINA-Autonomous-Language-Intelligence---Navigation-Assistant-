@@ -25,3 +25,4 @@ export * from './multiagent/task-delegator';
 export * from './voice';
 export * from './personality/alina-personality';
 export * from './adaptation';
+export * from './execution';
