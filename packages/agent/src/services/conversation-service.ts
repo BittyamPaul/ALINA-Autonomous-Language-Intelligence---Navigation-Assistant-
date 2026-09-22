@@ -71,6 +71,19 @@ export class ConversationService {
     }
     return updated;
   }
+
+  public async toggleMemory(id: string, memoryDisabled?: boolean): Promise<ConversationEntity> {
+    const current = await this.getById(id);
+    const newValue = memoryDisabled !== undefined ? memoryDisabled : !current.memoryDisabled;
+    const updated = await this.convRepo.update(id, {
+      memoryDisabled: newValue,
+      updatedAt: new Date().toISOString(),
+    });
+    if (!updated) {
+      throw new AlinaServiceError(`Conversation with ID ${id} was not found`, 'NOT_FOUND', 404);
+    }
+    return updated;
+  }
 }
 
 export const SendMessageInputSchema = z.object({

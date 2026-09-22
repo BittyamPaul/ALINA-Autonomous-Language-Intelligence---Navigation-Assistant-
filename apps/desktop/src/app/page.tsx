@@ -31,6 +31,7 @@ import {
 import { alinaApi } from '@/lib/api-client';
 import { NativeDesktopPanel } from '@/components/NativeDesktopPanel';
 import { ThingsAlinaRemembers } from '@/components/ThingsAlinaRemembers';
+import { PersonalContextInspector } from '@/components/PersonalContextInspector';
 import { DeveloperObservabilityPanel } from '@/components/DeveloperObservabilityPanel';
 import { KnowledgeExplorer } from '@/components/KnowledgeExplorer';
 import { SourceCitationBadge } from '@/components/SourceCitationBadge';
@@ -67,7 +68,8 @@ export default function AlinaHomePage() {
   const [approvalDialogOpen, setApprovalDialogOpen] = useState(false);
   const [toasts, setToasts] = useState<ToastProps[]>([]);
   const [errorBannerVisible, setErrorBannerVisible] = useState(false);
-  const [memoryTierTab, setMemoryTierTab] = useState<'personal' | 'persistent'>('personal');
+  const [memoryTierTab, setMemoryTierTab] = useState<'personal' | 'operating_graph' | 'persistent'>('personal');
+  const [sessionMemoryDisabled, setSessionMemoryDisabled] = useState(false);
   const [networkState, setNetworkState] = useState<NetworkReadinessState>('STARTING');
   const [wifiDialogOpen, setWifiDialogOpen] = useState(false);
   const [autoStartEnabled, setAutoStartEnabled] = useState(false);
@@ -1005,6 +1007,26 @@ export default function AlinaHomePage() {
           }
           memorySection={
             <div className="space-y-3">
+              <div className="flex items-center justify-between pb-1 border-b border-stone-200/60 dark:border-stone-800/60 text-xs">
+                <span className="text-[11px] font-mono text-stone-500 uppercase tracking-wider">
+                  Personal Context
+                </span>
+                <button
+                  onClick={() => {
+                    setActiveNav('memory');
+                    setMemoryTierTab('operating_graph');
+                  }}
+                  className="text-[10px] font-mono text-amber-700 dark:text-amber-400 hover:underline flex items-center space-x-1"
+                >
+                  <span>Context Graph &rarr;</span>
+                </button>
+              </div>
+              {sessionMemoryDisabled && (
+                <div className="p-2 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-[11px] text-amber-800 dark:text-amber-300 flex items-center space-x-1.5">
+                  <ShieldAlert className="w-3.5 h-3.5 shrink-0" />
+                  <span>Zero-Context Mode Active: Memory disabled for this session.</span>
+                </div>
+              )}
               {memories.map((mem) => (
                 <MemoryCard
                   key={mem.id}
@@ -1113,10 +1135,20 @@ export default function AlinaHomePage() {
                 <span>Layer 1: Personal Memory</span>
               </button>
               <button
+                onClick={() => setMemoryTierTab('operating_graph')}
+                className={`text-xs font-mono px-3.5 py-1.5 rounded-lg transition-all flex items-center space-x-2 ${
+                  memoryTierTab === 'operating_graph'
+                    ? 'bg-amber-600 text-white dark:bg-amber-500 dark:text-stone-950 font-semibold shadow-xs'
+                    : 'text-stone-500 hover:text-stone-800 dark:hover:text-stone-200'
+                }`}
+              >
+                <span>Layer 2: Context Graph & Inspector</span>
+              </button>
+              <button
                 onClick={() => setMemoryTierTab('persistent')}
                 className={`text-xs font-mono px-3.5 py-1.5 rounded-lg transition-all flex items-center space-x-2 ${
                   memoryTierTab === 'persistent'
-                    ? 'bg-amber-600 text-white dark:bg-amber-500 dark:text-stone-950 font-semibold shadow-xs'
+                    ? 'bg-stone-900 text-stone-100 dark:bg-stone-100 dark:text-stone-900 font-semibold shadow-xs'
                     : 'text-stone-500 hover:text-stone-800 dark:hover:text-stone-200'
                 }`}
               >
@@ -1128,9 +1160,17 @@ export default function AlinaHomePage() {
             </div>
           </div>
 
-          {memoryTierTab === 'personal' ? (
+          {memoryTierTab === 'personal' && (
             <ThingsAlinaRemembers onToast={addToast} />
-          ) : (
+          )}
+          {memoryTierTab === 'operating_graph' && (
+            <PersonalContextInspector
+              onToast={addToast}
+              isMemoryDisabled={sessionMemoryDisabled}
+              onToggleMemoryDisabled={setSessionMemoryDisabled}
+            />
+          )}
+          {memoryTierTab === 'persistent' && (
             <KnowledgeExplorer onToast={addToast} />
           )}
         </div>

@@ -7,3 +7,5 @@ export * from './graph-repo';
 export * from './knowledge-repo';
 export * from './learn-with-me-repo';
 export * from './task-checkpoint-repo';
+export * from './personal-context-repo';
+

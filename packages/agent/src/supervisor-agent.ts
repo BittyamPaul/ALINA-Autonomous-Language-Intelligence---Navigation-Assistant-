@@ -45,6 +45,8 @@ import {
   FailureClassifier,
   TaskRecoveryEngine,
 } from './execution';
+import { PersonalOsEngine, PersonalContextPreparationResult } from './context/personal-os-engine';
+import { ContextUsageRecordEntity } from '@alina/database';
 
 export interface SupervisorExecutionOptions {
   taskId?: string;
@@ -67,6 +69,8 @@ export interface SupervisorExecutionOptions {
   dependencies?: string[];
   abortController?: AbortController;
   onProgress?: (event: AgentEventEnvelope) => void;
+  isMemoryDisabled?: boolean;
+  personalOsEngine?: PersonalOsEngine;
 }
 
 export interface SupervisorExecutionResult {
@@ -84,6 +88,8 @@ export interface SupervisorExecutionResult {
   approvalRequest?: ApprovalRequest;
   subagentResults?: StructuredTaskResult[];
   delegated?: boolean;
+  contextUsages?: ContextUsageRecordEntity[];
+  isMemoryDisabled?: boolean;
 }
 
 /**
@@ -123,6 +129,7 @@ export class AlinaSupervisorAgent {
   private watchdog: TaskWatchdog;
   private checkpointRepo?: TaskCheckpointRepository;
   private recoveryEngine?: TaskRecoveryEngine;
+  private personalOsEngine: PersonalOsEngine;
 
   constructor(options: {
     config?: Partial<AgentConfig>;
@@ -144,10 +151,12 @@ export class AlinaSupervisorAgent {
     watchdog?: TaskWatchdog;
     checkpointRepo?: TaskCheckpointRepository;
     recoveryEngine?: TaskRecoveryEngine;
+    personalOsEngine?: PersonalOsEngine;
   }) {
     this.config = { ...DEFAULT_AGENT_CONFIG, ...options.config };
     this.modelAdapter = options.modelAdapter ?? new MastraModelAdapter(this.config);
     this.observabilityService = options.observabilityService || AlinaObservabilityService.getInstance();
+    this.personalOsEngine = options.personalOsEngine || new PersonalOsEngine();
     if (options.mcpRegistry) {
       this.mcpBridge = new McpAgentBridge(options.mcpRegistry);
     }
@@ -246,6 +255,10 @@ export class AlinaSupervisorAgent {
 
   public getCheckpointRepository(): TaskCheckpointRepository | undefined {
     return this.checkpointRepo;
+  }
+
+  public getPersonalOsEngine(): PersonalOsEngine {
+    return this.personalOsEngine;
   }
 
   public cancel(taskId: string): void {
@@ -486,8 +499,39 @@ export class AlinaSupervisorAgent {
       }
     }
 
+    // Query Personal Context & Operating Graph (if memory enabled)
+    let personalContextPrep: PersonalContextPreparationResult | undefined;
+    let contextUsages: ContextUsageRecordEntity[] = [];
+
+    if (!options.isMemoryDisabled) {
+      try {
+        personalContextPrep = await this.personalOsEngine.preparePlanningContext({
+          goal: options.goal,
+          projectId: options.projectId,
+          conversationId: options.sessionId,
+          isMemoryDisabled: options.isMemoryDisabled,
+        });
+        contextUsages = personalContextPrep.usageRecords;
+
+        if (personalContextPrep.activeContextItems.length > 0) {
+          emitProgress(
+            `Integrated ${personalContextPrep.activeContextItems.length} personal operating context item(s) for task planning.`,
+            'step:progress'
+          );
+        }
+      } catch {
+        // Non-blocking fallback
+      }
+    } else {
+      emitProgress('Per-conversation memory toggle disabled; proceeding with zero personal context.', 'step:progress');
+    }
+
+    const effectiveSystemPrompt = personalContextPrep?.promptSection
+      ? `${this.config.instructions}\n\n${personalContextPrep.promptSection}`
+      : this.config.instructions;
+
     const modelContext = {
-      systemPrompt: this.config.instructions,
+      systemPrompt: effectiveSystemPrompt,
       availableTools,
       taskId,
       relevantMemories,
@@ -530,6 +574,8 @@ export class AlinaSupervisorAgent {
         toolCallsCount: 0,
         error: errorMsg,
         checkpointCount: checkpointsSavedCount,
+        contextUsages,
+        isMemoryDisabled: options.isMemoryDisabled ?? false,
       };
     }
 
@@ -930,6 +976,8 @@ export class AlinaSupervisorAgent {
           toolCallsCount,
           error: errorMsg,
           checkpointCount: checkpointsSavedCount,
+          contextUsages,
+          isMemoryDisabled: options.isMemoryDisabled ?? false,
         };
       }
 
@@ -1019,6 +1067,24 @@ export class AlinaSupervisorAgent {
       }
     }
 
+    // Record episodic learning from completed task outcome in personal OS context graph
+    if (!options.isMemoryDisabled) {
+      try {
+        await this.personalOsEngine.learnFromSuccessfulOutcome(
+          taskId,
+          options.goal,
+          summary,
+          {
+            projectId: options.projectId,
+            conversationId: options.sessionId,
+            technologies: options.dependencies,
+          }
+        );
+      } catch {
+        // Non-blocking learning
+      }
+    }
+
     return {
       taskId,
       goal: options.goal,
@@ -1029,6 +1095,8 @@ export class AlinaSupervisorAgent {
       stepsCompleted,
       toolCallsCount,
       checkpointCount: checkpointsSavedCount,
+      contextUsages,
+      isMemoryDisabled: options.isMemoryDisabled ?? false,
     };
   }
 

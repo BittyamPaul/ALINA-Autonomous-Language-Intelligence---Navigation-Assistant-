@@ -15,7 +15,9 @@ import {
   AlinaObservabilityService,
   createSuccessResponse,
   createErrorResponse,
+  PersonalOsEngine,
 } from '@alina/agent';
+import { PersonalContextRepository } from '@alina/database';
 import { createDefaultToolRegistry, createAlinaMcpToolRegistry } from '@alina/tools';
 
 let globalClient: AlinaDatabaseClient | null = null;
@@ -30,6 +32,8 @@ let services: {
   agentRuns: AgentRunService;
   audit: AuditService;
   knowledge: KnowledgeService;
+  personalContextRepo: PersonalContextRepository;
+  personalOs: PersonalOsEngine;
 } | null = null;
 let supervisorAgent: AlinaSupervisorAgent | null = null;
 
@@ -43,6 +47,9 @@ export async function getServerServices() {
   }
 
   if (!services) {
+    const personalContextRepo = new PersonalContextRepository(globalClient);
+    const personalOs = new PersonalOsEngine(personalContextRepo);
+
     services = {
       db: globalClient,
       conversations: new ConversationService(globalClient),
@@ -54,6 +61,8 @@ export async function getServerServices() {
       agentRuns: new AgentRunService(globalClient),
       audit: new AuditService(globalClient),
       knowledge: new KnowledgeService(globalClient),
+      personalContextRepo,
+      personalOs,
     };
   }
 
@@ -61,7 +70,7 @@ export async function getServerServices() {
 }
 
 export async function getSupervisorAgent(): Promise<AlinaSupervisorAgent> {
-  const { db, tasks, agentRuns, memories } = await getServerServices();
+  const { db, tasks, agentRuns, memories, personalOs } = await getServerServices();
   if (!supervisorAgent) {
     const toolRegistry = createDefaultToolRegistry();
     const mcpRegistry = createAlinaMcpToolRegistry();
@@ -75,6 +84,7 @@ export async function getSupervisorAgent(): Promise<AlinaSupervisorAgent> {
       memoryService: memories,
       authorizationManager: authManager,
       observabilityService: AlinaObservabilityService.getInstance(),
+      personalOsEngine: personalOs,
     });
   }
   return supervisorAgent;

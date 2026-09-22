@@ -42,6 +42,7 @@ export const ConversationSchema = z.object({
   title: z.string().min(1),
   summary: z.string().optional(),
   status: z.enum(['active', 'archived']).default('active'),
+  memoryDisabled: z.boolean().default(false).optional(),
   createdAt: z.string().datetime().default(() => new Date().toISOString()),
   updatedAt: z.string().datetime().default(() => new Date().toISOString()),
 });
@@ -828,5 +829,28 @@ export const LearningSessionSchema = z.object({
   createdAt: z.string().datetime().default(() => new Date().toISOString()),
 });
 export type LearningSessionEntity = z.infer<typeof LearningSessionSchema>;
+
+// Personal Context Graph & Project re-exports
+export {
+  ProjectSchema,
+  type Project as ProjectEntity,
+  PersonalContextNodeTypeSchema,
+  type PersonalContextNodeType,
+  PersonalContextRelationSchema,
+  type PersonalContextRelation,
+  PersonalContextProvenanceSchema,
+  type PersonalContextProvenance,
+  PersonalContextNodeSchema,
+  type PersonalContextNode as PersonalContextNodeEntity,
+  PersonalContextEdgeSchema,
+  type PersonalContextEdge as PersonalContextEdgeEntity,
+  PersonalContextExplanationSchema,
+  type PersonalContextExplanation,
+  ContextUsageRecordSchema,
+  type ContextUsageRecord as ContextUsageRecordEntity,
+  UnifiedPersonalContextGraphSchema,
+  type UnifiedPersonalContextGraph,
+} from '@alina/shared';
+
 
 

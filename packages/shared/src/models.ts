@@ -328,6 +328,7 @@ export const SessionSchema = z.object({
   id: z.string(),
   title: z.string(),
   projectId: z.string().optional(),
+  memoryDisabled: z.boolean().default(false).optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });
@@ -448,9 +449,122 @@ export const ProjectSchema = z.object({
   name: z.string(),
   rootPath: z.string(),
   description: z.string().optional(),
+  workspaceId: z.string().optional(),
+  technologies: z.array(z.string()).default([]),
+  activeTaskIds: z.array(z.string()).default([]),
+  settings: z.record(z.unknown()).default({}),
   createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime().optional(),
 });
 export type Project = z.infer<typeof ProjectSchema>;
+
+// =========================================================================
+// Unified Personal Operating System & Context Graph
+// =========================================================================
+
+export const PersonalContextNodeTypeSchema = z.enum([
+  'USER',
+  'PROJECT',
+  'TECHNOLOGY',
+  'PREFERENCE',
+  'WORKFLOW',
+  'CONCEPT',
+  'TASK',
+  'KNOWLEDGE',
+  'CONVERSATION',
+  'VOICE_SESSION',
+]);
+export type PersonalContextNodeType = z.infer<typeof PersonalContextNodeTypeSchema>;
+
+export const PersonalContextRelationSchema = z.enum([
+  'prefers',
+  'works_on',
+  'uses',
+  'contains',
+  'related_to',
+  'learned',
+  'frequently_performs',
+  'remembers',
+  'recorded_in',
+]);
+export type PersonalContextRelation = z.infer<typeof PersonalContextRelationSchema>;
+
+export const PersonalContextProvenanceSchema = z.object({
+  sourceConversationId: z.string().optional(),
+  sourceTaskId: z.string().optional(),
+  learnedAt: z.string().datetime().default(() => new Date().toISOString()),
+  reasonRemembered: z.string().optional(),
+  originalStatement: z.string().optional(),
+});
+export type PersonalContextProvenance = z.infer<typeof PersonalContextProvenanceSchema>;
+
+export const PersonalContextNodeSchema = z.object({
+  id: z.string(),
+  type: PersonalContextNodeTypeSchema,
+  name: z.string(),
+  description: z.string().optional(),
+  properties: z.record(z.unknown()).default({}),
+  confidence: z.number().min(0).max(1).default(1.0),
+  source: z.string().default('USER_STATED'), // 'USER_STATED' | 'OBSERVED_PATTERN' | 'TASK_EXECUTION' | 'SYSTEM'
+  provenance: PersonalContextProvenanceSchema.default(() => ({ learnedAt: new Date().toISOString() })),
+  isProtected: z.boolean().default(false),
+  createdAt: z.string().datetime().default(() => new Date().toISOString()),
+  updatedAt: z.string().datetime().default(() => new Date().toISOString()),
+});
+export type PersonalContextNode = z.infer<typeof PersonalContextNodeSchema>;
+export type PersonalContextNodeEntity = PersonalContextNode;
+
+export const PersonalContextEdgeSchema = z.object({
+  id: z.string(),
+  fromNodeId: z.string(),
+  fromType: PersonalContextNodeTypeSchema,
+  relation: PersonalContextRelationSchema,
+  toNodeId: z.string(),
+  toType: PersonalContextNodeTypeSchema,
+  weight: z.number().min(0).max(1).default(1.0),
+  metadata: z.record(z.unknown()).default({}),
+  createdAt: z.string().datetime().default(() => new Date().toISOString()),
+});
+export type PersonalContextEdge = z.infer<typeof PersonalContextEdgeSchema>;
+export type PersonalContextEdgeEntity = PersonalContextEdge;
+
+export const PersonalContextExplanationSchema = z.object({
+  nodeId: z.string(),
+  nodeType: PersonalContextNodeTypeSchema,
+  name: z.string(),
+  whyRemembered: z.string(),
+  source: z.string(),
+  learnedAt: z.string(),
+  confidence: z.number(),
+  originalStatement: z.string().optional(),
+  associatedProject: z.string().optional(),
+  canForget: z.boolean().default(true),
+});
+export type PersonalContextExplanation = z.infer<typeof PersonalContextExplanationSchema>;
+
+export const ContextUsageRecordSchema = z.object({
+  id: z.string(),
+  taskId: z.string(),
+  nodeId: z.string(),
+  nodeType: PersonalContextNodeTypeSchema,
+  nodeName: z.string(),
+  justification: z.string(), // e.g. "Used because you previously told me this is your main development project."
+  appliedToStep: z.string().optional(),
+  overriddenByPrompt: z.boolean().default(false),
+  usedAt: z.string().datetime().default(() => new Date().toISOString()),
+});
+export type ContextUsageRecord = z.infer<typeof ContextUsageRecordSchema>;
+export type ContextUsageRecordEntity = ContextUsageRecord;
+
+export const UnifiedPersonalContextGraphSchema = z.object({
+  nodes: z.array(PersonalContextNodeSchema),
+  edges: z.array(PersonalContextEdgeSchema),
+  rootUserId: z.string().default('user_default'),
+  generatedAt: z.string().datetime().default(() => new Date().toISOString()),
+});
+export type UnifiedPersonalContextGraph = z.infer<typeof UnifiedPersonalContextGraphSchema>;
+export type UnifiedPersonalContextGraphEntity = UnifiedPersonalContextGraph;
+
 
 // =========================================================================
 // Multi-Agent Architecture & Structured Delegation Contracts

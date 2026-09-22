@@ -39,6 +39,11 @@ import type {
   WifiNetwork,
   WifiConnectResult,
   AutoStartConfig,
+  UnifiedPersonalContextGraph,
+  PersonalContextExplanation,
+  ContextUsageRecordEntity,
+  PersonalContextNodeEntity,
+  PersonalContextEdgeEntity,
 } from '@alina/shared';
 
 export class AlinaApiClient {
@@ -99,6 +104,11 @@ export class AlinaApiClient {
     archive: (id: string) =>
       this.request<ConversationEntity>(`/api/conversations/${encodeURIComponent(id)}`, {
         method: 'PATCH',
+      }),
+    toggleMemory: (id: string, memoryDisabled?: boolean) =>
+      this.request<ConversationEntity>(`/api/conversations/${encodeURIComponent(id)}/toggle-memory`, {
+        method: 'POST',
+        body: JSON.stringify({ memoryDisabled }),
       }),
   };
 
@@ -428,6 +438,33 @@ export class AlinaApiClient {
       this.request<{ success: boolean; enabled: boolean }>('/api/network/autostart', {
         method: 'POST',
         body: JSON.stringify({ enabled }),
+      }),
+  };
+
+  // Personal Context Graph & Operating System Layer
+  public readonly personalContext = {
+    getUnifiedGraph: (userId = 'user_default') =>
+      this.request<UnifiedPersonalContextGraph>(`/api/personal-context?userId=${encodeURIComponent(userId)}`),
+    getProjectGraph: (projectId: string) =>
+      this.request<UnifiedPersonalContextGraph>(`/api/personal-context?projectId=${encodeURIComponent(projectId)}`),
+    getRecentUsages: (limit = 20) =>
+      this.request<ContextUsageRecordEntity[]>(`/api/personal-context?usages=true&limit=${limit}`),
+    explain: (nodeId: string) =>
+      this.request<PersonalContextExplanation>(`/api/personal-context/explain?nodeId=${encodeURIComponent(nodeId)}`),
+    forget: (nodeId: string) =>
+      this.request<{ success: boolean; edgesDeleted: number; explanation: string }>(
+        `/api/personal-context?nodeId=${encodeURIComponent(nodeId)}`,
+        { method: 'DELETE' }
+      ),
+    upsertNode: (node: PersonalContextNodeEntity) =>
+      this.request<PersonalContextNodeEntity>('/api/personal-context', {
+        method: 'POST',
+        body: JSON.stringify({ node }),
+      }),
+    relate: (fromId: string, fromType: string, relation: string, toId: string, toType: string, weight?: number) =>
+      this.request<PersonalContextEdgeEntity>('/api/personal-context', {
+        method: 'POST',
+        body: JSON.stringify({ action: 'relate', fromId, fromType, relation, toId, toType, weight }),
       }),
   };
 }
