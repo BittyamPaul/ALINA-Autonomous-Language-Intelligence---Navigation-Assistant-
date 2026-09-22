@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.2.0] - 2026-09-23
+
+### Added
+- **High-Reliability Task Execution Engine & Crash Recovery**:
+  - 11 Canonical uppercase task states (`CREATED`, `PLANNING`, `READY`, `RUNNING`, `WAITING_FOR_APPROVAL`, `WAITING_FOR_NETWORK`, `RETRYING`, `VERIFYING`, `COMPLETED`, `FAILED`, `CANCELLED`).
+  - Mandatory 10-attribute task schema with `goal`, `plan`, `currentStep`, `dependencies`, `retryPolicy`, `timeout`, `cancellation`, `recoveryStrategy`, `verificationCriteria`, and `finalState`.
+  - SurrealDB Step Checkpointing (`task_checkpoint` table) with atomic saves after every meaningful step.
+  - Startup Crash Recovery Engine (`TaskRecoveryEngine`) scanning incomplete tasks on boot and inspecting checkpoints before continuing.
+  - Idempotency Guard (`IdempotencyGuard`) verifying environmental post-conditions before retrying side-effecting operations (file copies, writes, shell processes).
+  - Task Watchdog (`TaskWatchdog`) enforcing liveness guarantees so tasks never hang indefinitely in `PLANNING`, `RUNNING`, or `RETRYING`.
+  - 6-Class Failure Classification (`TRANSIENT`, `PERMANENT`, `USER_ACTION_REQUIRED`, `PERMISSION_REQUIRED`, `NETWORK_REQUIRED`, `UNKNOWN`).
+  - Honest failure reporting with complete error classification and zero silent successes.
+  - Disciplined GitHub development setup: 7-stage GitHub Actions CI (`ci.yml`), development checkpoint procedure, and Antigravity workspace Agent Skill (`alina-engineering`).
+
+---
+
+## [1.1.0] - 2026-09-22
+
+### Added
+- **Adaptive Personal Learning & Voice Architecture**:
+  - "Learn With Me" personal adaptation engine with confidence scoring, pattern extraction, and operator review UI.
+  - Granular category controls for preferences, workflows, technical style, and domain memory.
+  - Redesigned multimodal voice lifecycle: Wake Mode (passive wake word) and continuous hands-free Conversation Mode with barge-in handling.
+  - Zero-audio-stream retention policy and automated `PrivacySanitizer` scrub on memory indexing.
+
+---
+
 ## [1.0.0] - 2026-09-20
 
 ### Added

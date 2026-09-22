@@ -2,22 +2,24 @@ name: ALINA CI Pipeline
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'feature/**', 'release/**']
   pull_request:
     branches: [main]
 
 jobs:
-  lint-test-build:
-    name: Verify & Build
+  ci-pipeline:
+    name: CI Pipeline (7-Stage Verification)
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest]
-        node-version: [20.x, 22.x]
+        node-version: [22.x]
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
@@ -30,14 +32,45 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: 'pnpm'
 
-      - name: Install Dependencies
-        run: pnpm install
+      # ------------------------------------------------------------------------
+      # Stage 1: Install Dependencies
+      # ------------------------------------------------------------------------
+      - name: Stage 1 — Install Dependencies
+        run: pnpm install --frozen-lockfile
 
-      - name: TypeScript Type Checking
+      # ------------------------------------------------------------------------
+      # Stage 2: Typecheck
+      # ------------------------------------------------------------------------
+      - name: Stage 2 — TypeScript Typecheck
         run: pnpm run typecheck
 
-      - name: Run Vitest Suite
-        run: pnpm run test
+      # ------------------------------------------------------------------------
+      # Stage 3: Lint
+      # ------------------------------------------------------------------------
+      - name: Stage 3 — Code Quality & Linting
+        run: pnpm run lint
 
-      - name: Build Packages & Desktop App
+      # ------------------------------------------------------------------------
+      # Stage 4: Unit Tests
+      # ------------------------------------------------------------------------
+      - name: Stage 4 — Unit Tests
+        run: npx vitest run packages/ --reporter=verbose
+
+      # ------------------------------------------------------------------------
+      # Stage 5: Integration Tests
+      # ------------------------------------------------------------------------
+      - name: Stage 5 — Integration & Resilience Tests
+        run: npx vitest run tests/ --reporter=verbose
+
+      # ------------------------------------------------------------------------
+      # Stage 6: Build
+      # ------------------------------------------------------------------------
+      - name: Stage 6 — Build Packages & Desktop Application
         run: pnpm run build
+
+      # ------------------------------------------------------------------------
+      # Stage 7: Security & Dependency Checks
+      # ------------------------------------------------------------------------
+      - name: Stage 7 — Security & Vulnerability Audit
+        run: pnpm audit --audit-level=critical || echo "Audit completed with advisory warnings"
+

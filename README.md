@@ -6,13 +6,13 @@
 
 **A calm, local-first personal computer companion engineered as an ambient operating layer with Human-In-The-Loop safety gates, Model Context Protocol (MCP) tooling, multi-agent orchestration, and SurrealDB hybrid memory.**
 
-[![Build & Release Status](https://img.shields.io/badge/Release-v1.0.0-amber.svg?style=flat-square)](https://github.com/alina-ai/alina/releases)
+[![Build & Release Status](https://img.shields.io/badge/Release-v1.2.0-amber.svg?style=flat-square)](https://github.com/BittyamPaul/ALINA-Autonomous-Language-Intelligence---Navigation-Assistant-/releases)
 [![TypeScript Strict](https://img.shields.io/badge/TypeScript-5.7%20Strict-blue.svg?style=flat-square)](https://www.typescriptlang.org/)
 [![Turborepo](https://img.shields.io/badge/Turborepo-2.x-ef4444.svg?style=flat-square)](https://turbo.build/)
 [![Tauri v2](https://img.shields.io/badge/Tauri-2.0-f97316.svg?style=flat-square)](https://tauri.app/)
 [![Next.js](https://img.shields.io/badge/Next.js-15.1-black.svg?style=flat-square)](https://nextjs.org/)
 [![SurrealDB](https://img.shields.io/badge/SurrealDB-v2.2-8b5cf6.svg?style=flat-square)](https://surrealdb.com/)
-[![Vitest Test Suite](https://img.shields.io/badge/Tests-248%20Passed-10b981.svg?style=flat-square)](https://vitest.dev/)
+[![Vitest Test Suite](https://img.shields.io/badge/Tests-390%20Passed-10b981.svg?style=flat-square)](https://vitest.dev/)
 [![License](https://img.shields.io/badge/License-MIT-stone.svg?style=flat-square)](LICENSE)
 
 [Architecture](ARCHITECTURE.md) • [Security Model](SECURITY.md) • [Development](DEVELOPMENT.md) • [Deployment Manual](DEPLOYMENT.md) • [Contributing](CONTRIBUTING.md) • [Changelog](CHANGELOG.md)
@@ -43,12 +43,14 @@ Unlike cloud chat interfaces, ALINA executes multi-step plans locally on your ma
 
 ## 3. Feature Highlights
 
+- ✦ **High-Reliability Task Execution & Crash Recovery**: 11 canonical states, SurrealDB step checkpointing (`task_checkpoint`), crash recovery inspecting previous outcomes, `IdempotencyGuard` preventing blind side-effect retries, and `TaskWatchdog` liveness guarantees.
 - ✦ **Controlled Multi-Agent System**: A dedicated Supervisor Agent routes workflows across 5 specialized subagents (`research`, `browser`, `document`, `filesystem`, `computer`) using dynamic delegation heuristics.
+- ✦ **Adaptive Learning & "Learn With Me"**: Continuous extraction of user preferences, coding styles, and project patterns with per-category privacy controls and confidence scoring.
 - ✦ **Playwright MCP Browser Automation**: Headless browser automation providing DOM heading inspection, visible text extraction, tab management, and automated PNG visual deliverables.
 - ✦ **PathJail Filesystem Containment**: Zero-trust directory sandboxing that confines tool reads and writes within user-approved workspace roots and blocks directory traversal (`../`).
 - ✦ **Cryptographic Approval Gates**: High-risk operations (file deletion, external command execution) halt execution, transition to `awaiting_approval`, and require user approval tokens.
 - ✦ **SurrealDB Multi-Model Engine**: Seamlessly combines Document records, Graph relationships (`has_step`, `produced_deliverable`), and HNSW cosine vector search for semantic recall.
-- ✦ **Multimodal Voice Interaction**: Speech-to-Text and Text-to-Speech audio pipeline with voice activity detection (VAD), streaming transcripts, and barge-in capability.
+- ✦ **Multimodal Voice Interaction**: Speech-to-Text and Text-to-Speech audio pipeline with natural female TTS, Wake Mode, hands-free Conversation Mode, and barge-in capability.
 - ✦ **Decoupled Architecture**: Distributed as native desktop installers (NSIS `currentUser`, MSI, DMG, AppImage) connecting to private VPC services or running in standalone offline mode.
 - ✦ **Automated Secret Redaction**: Application logging and crash reports pass through `SecretRedactor`, masking API keys (`sk-ant-*`, `sk-*`, `AIza*`) with `[REDACTED_SECRET]`.
 
@@ -370,13 +372,13 @@ pnpm --filter @alina/desktop tauri dev
 ALINA maintains a comprehensive multi-layer automated testing battery:
 
 ```bash
-# 1. Run full Vitest suite across all 17 test suites (248 tests)
+# 1. Run full Vitest suite across all 26 test suites (390 tests)
 npx vitest run
 
 # 2. Run TypeScript strict mode typecheck across all 14 packages
 pnpm run typecheck
 
-# 3. Run ESLint across all 8 packages
+# 3. Run ESLint across all packages and applications
 pnpm run lint
 
 # 4. Run desktop distribution 10-point smoke test suite

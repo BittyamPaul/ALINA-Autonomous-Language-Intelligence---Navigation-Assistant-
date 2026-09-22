@@ -22,8 +22,8 @@ Ensure the following tools are installed on your host system:
 
 ```bash
 # 1. Clone repository
-git clone https://github.com/alina-ai/alina.git
-cd alina
+git clone https://github.com/BittyamPaul/ALINA-Autonomous-Language-Intelligence---Navigation-Assistant-.git
+cd "ALINA(Autonomous Language Intelligence & Navigation Assistant)"
 
 # 2. Install monorepo workspace dependencies
 pnpm install
@@ -34,7 +34,7 @@ cp .env.example .env
 # 4. Run TypeScript typecheck to verify dependencies
 pnpm run typecheck
 
-# 5. Run the complete automated test battery
+# 5. Run the complete automated test battery (390 tests across 26 suites)
 pnpm test
 ```
 
@@ -54,11 +54,14 @@ pnpm build
 # Run TypeScript strict typecheck across all 14 packages
 pnpm run typecheck
 
-# Run ESLint across all 8 packages
+# Run ESLint across all packages and applications
 pnpm run lint
 
-# Run all 17 automated test suites (248 tests)
+# Run all 26 automated test suites (390 tests)
 pnpm test
+
+# Run tests with active watching
+pnpm vitest
 
 # Clean all build outputs, dist directories, and caches
 pnpm clean
@@ -183,3 +186,50 @@ pnpm --filter @alina/desktop build:export
 pnpm --filter @alina/desktop tauri:build
 ```
 Installer bundles are generated in `apps/desktop/src-tauri/target/release/bundle/`.
+
+---
+
+## 7. Disciplined Development Checkpoint Procedure
+
+To protect master/main branches and maintain a clean, bisectable history:
+
+### Before Starting Any Major Feature
+```bash
+# 1. Inspect status
+git status
+
+# 2. If existing work is uncommitted, checkpoint it
+git add .
+git commit -m "chore: checkpoint working state before <feature-name>"
+
+# 3. Create dedicated feature branch
+git checkout -b feature/<feature-name>
+```
+
+### After Feature Completion
+```bash
+# 1. Run the mandatory 4-point verification battery
+pnpm run typecheck
+pnpm run lint
+pnpm test
+pnpm --filter @alina/desktop build
+
+# 2. Stage and commit with conventional message
+git add .
+git commit -m "feat(<scope>): <description>"
+
+# 3. Push feature branch to origin
+git push -u origin feature/<feature-name>
+
+# 4. Prepare PR summary (never auto-merge, never force-push)
+```
+
+### Commit Convention
+- `feat:` New capability or feature
+- `fix:` Bug fix or corrective patch
+- `refactor:` Restructuring without behavior change
+- `test:` Test additions or updates
+- `docs:` Documentation improvements
+- `chore:` Maintenance, builds, or dependencies
+- `security:` Security hardening, sandboxing, or vulnerability remediation
+

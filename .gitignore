@@ -1,40 +1,77 @@
+# ==============================================================================
+# ALINA — .gitignore
+# ==============================================================================
+
 # Dependencies
-node_modules
-.pnpm-store
+node_modules/
+.pnpm-store/
 
-# Build outputs
-dist
-.next
-out
-build
-target
+# Build Outputs & Cache
+dist/
+.next/
+out/
+build/
+target/
+src-tauri/target/
+.tauri/
+*.tsbuildinfo
+tsconfig.tsbuildinfo
 
-# Turbo
-.turbo
+# Monorepo Turborepo
+.turbo/
 
-# Environment
+# Environment Configurations & Local Secrets
 .env
 .env.local
 .env.*.local
 *.env
+*.env.local
+credentials.json
+*.pem
+*.key
+*.cert
+id_rsa*
 
-# Logs
+# Runtime Logs
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 *.log
+logs/
 
-# OS Files
+# Operating System Metadata
 .DS_Store
 Thumbs.db
+Desktop.ini
 
-# Playwright
+# Testing & Coverage Artifacts
+coverage/
+.nyc_output/
 test-results/
 playwright-report/
 blob-report/
 playwright/.cache/
 
-# SurrealDB local data
+# SurrealDB Local Data & SQLite Fallbacks
 surreal-data/
 *.db
+*.db-journal
+*.db-wal
+
+# Temporary IDE / Agent Media & Scratch Storage
+.tempmediaStorage/
+.test-sandbox/
+scratch/tmp/
+*.tmp
+
+# Editor Settings (preserve team recommendations)
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+

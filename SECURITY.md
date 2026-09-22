@@ -10,6 +10,8 @@
 2. **Explicit Human Approval for Destructive Operations**: No destructive file deletions, workspace escapes, or mutating shell commands may execute without explicit human authorization.
 3. **Fail-Closed Sandbox Defaults**: Any error or ambiguity in path resolution, permission checking, or parameter parsing halts execution immediately.
 4. **Automated Secret Sanitization**: Secrets, API keys, database credentials, and Bearer tokens are scrubbed from all logs, telemetry streams, and crash reports.
+5. **Zero Secrets in Code**: Never commit secrets, credentials, or Personal Access Tokens into source code or Git history. Use OS Keyring or Git Credential Manager for authentication.
+6. **Crash Recovery & Idempotency Safeguards**: Retrying side-effecting operations requires pre-verification of destination state to prevent corrupted repeated executions.
 
 ---
 
