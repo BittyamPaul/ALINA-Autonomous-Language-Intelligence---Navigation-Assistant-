@@ -33,6 +33,7 @@ impl std::error::Error for NativeCommandError {}
 
 /// Whitelist of approved applications that can be launched by ALINA.
 const APPROVED_APPLICATIONS: &[&str] = &[
+    "camera",
     "calc",
     "calculator",
     "notepad",
@@ -41,6 +42,9 @@ const APPROVED_APPLICATIONS: &[&str] = &[
     "terminal",
     "wt", // Windows Terminal
     "mspaint",
+    "paint",
+    "browser",
+    "edge",
 ];
 
 /// Dangerous argument tokens that are strictly rejected.

@@ -124,7 +124,92 @@ export class MastraModelAdapter implements ModelAdapter {
   private fallbackLocalPlanner(prompt: string, context?: ModelAdapterContext): ModelGenerationResult {
     const lower = prompt.toLowerCase();
 
-    // 1. Filesystem inspection / directory listing
+    // 1. Desktop Application Launching / Native Device Control (Camera, Calc, Notepad, Paint, Terminal, Code, Browser)
+    if (
+      lower.includes('camera') ||
+      lower.includes('webcam') ||
+      lower.includes('photo') ||
+      lower.includes('calc') ||
+      lower.includes('calculator') ||
+      lower.includes('notepad') ||
+      lower.includes('paint') ||
+      lower.includes('mspaint') ||
+      lower.includes('terminal') ||
+      lower.includes('cmd') ||
+      lower.includes('command prompt') ||
+      lower.includes('powershell') ||
+      lower.includes('code') ||
+      lower.includes('vscode') ||
+      lower.includes('vs code') ||
+      lower.startsWith('open ') ||
+      lower.startsWith('launch ') ||
+      lower.startsWith('start ')
+    ) {
+      let targetApp = 'camera';
+      if (lower.includes('camera') || lower.includes('webcam') || lower.includes('photo')) {
+        targetApp = 'camera';
+      } else if (lower.includes('calc') || lower.includes('calculator')) {
+        targetApp = 'calc';
+      } else if (lower.includes('notepad') || lower.includes('notes')) {
+        targetApp = 'notepad';
+      } else if (lower.includes('paint') || lower.includes('mspaint')) {
+        targetApp = 'mspaint';
+      } else if (lower.includes('terminal') || lower.includes('command prompt') || lower.includes('powershell') || lower.includes('cmd')) {
+        targetApp = 'terminal';
+      } else if (lower.includes('code') || lower.includes('vscode') || lower.includes('vs code')) {
+        targetApp = 'code';
+      } else if (lower.includes('browser') || lower.includes('edge') || lower.includes('chrome')) {
+        targetApp = 'browser';
+      } else {
+        const appMatch = prompt.match(/(?:open|launch|start)\s+([a-zA-Z0-9_-]+)/i);
+        if (appMatch?.[1]) {
+          targetApp = appMatch[1].toLowerCase();
+        }
+      }
+
+      return {
+        text: `Launching native application "${targetApp}".`,
+        toolCalls: [
+          {
+            toolName: 'computer_launch_app',
+            parameters: { appName: targetApp, args: [] },
+          },
+        ],
+        usage: { promptTokens: 25, completionTokens: 20, totalTokens: 45 },
+      };
+    }
+
+    // 2. Screenshot & Display capture
+    if (lower.includes('screenshot') || lower.includes('capture screen') || lower.includes('screen shot')) {
+      return {
+        text: 'Capturing desktop screenshot.',
+        toolCalls: [
+          {
+            toolName: 'computer_capture_screenshot',
+            parameters: {},
+          },
+        ],
+        usage: { promptTokens: 20, completionTokens: 20, totalTokens: 40 },
+      };
+    }
+
+    // 3. Browser Navigation & URL inspection
+    if (lower.includes('browse') || lower.includes('http://') || lower.includes('https://') || lower.includes('.com') || lower.includes('.org')) {
+      const match = prompt.match(/https?:\/\/[^\s]+/i);
+      const url = match?.[0] ?? 'https://github.com';
+      return {
+        text: `Navigating browser to: ${url}.`,
+        toolCalls: [
+          {
+            toolName: 'browser_navigate',
+            parameters: { url },
+          },
+        ],
+        usage: { promptTokens: 25, completionTokens: 20, totalTokens: 45 },
+      };
+    }
+
+    // 4. Filesystem inspection / directory listing
     if (lower.includes('workspace') || lower.includes('list') || lower.includes('inspect') || lower.includes('directory')) {
       const toolName = context?.availableTools?.some((t) => t.name === 'safe_workspace_inspector')
         ? 'safe_workspace_inspector'
@@ -144,7 +229,7 @@ export class MastraModelAdapter implements ModelAdapter {
       };
     }
 
-    // 2. Read file
+    // 5. Read file
     if (lower.includes('read') && (lower.includes('file') || lower.includes('.txt') || lower.includes('.json') || lower.includes('.md'))) {
       const match = prompt.match(/(?:read|cat|view)\s+(?:file\s+)?([^\s"']+)/i);
       const filePath = match?.[1] ?? 'package.json';
@@ -160,7 +245,7 @@ export class MastraModelAdapter implements ModelAdapter {
       };
     }
 
-    // 3. Write / Create file (mutating, will trigger HITL approval as required)
+    // 6. Write / Create file (mutating, will trigger HITL approval as required)
     if (lower.includes('create') || lower.includes('write') || lower.includes('save')) {
       const match = prompt.match(/(?:create|write|save)\s+(?:file\s+)?([^\s"']+)/i);
       const targetPath = match?.[1] ?? 'alina_output.txt';
@@ -176,7 +261,7 @@ export class MastraModelAdapter implements ModelAdapter {
       };
     }
 
-    // 4. Delete file (mutating, will trigger HITL approval as required)
+    // 7. Delete file (mutating, will trigger HITL approval as required)
     if (lower.includes('delete') || lower.includes('remove') || lower.includes('purge')) {
       const match = prompt.match(/(?:delete|remove|purge)\s+(?:file\s+)?([^\s"']+)/i);
       const targetPath = match?.[1] ?? 'temp.txt';
@@ -192,7 +277,7 @@ export class MastraModelAdapter implements ModelAdapter {
       };
     }
 
-    // 5. System info
+    // 8. System info
     if (lower.includes('system') || lower.includes('os') || lower.includes('hardware') || lower.includes('status')) {
       return {
         text: 'Checking local operating system status.',
@@ -206,7 +291,7 @@ export class MastraModelAdapter implements ModelAdapter {
       };
     }
 
-    // 6. Generic task completion
+    // 9. Generic task completion
     return {
       text: `Processed objective: "${prompt}". Execution plan formulated cleanly.`,
       toolCalls: [],

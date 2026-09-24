@@ -12,7 +12,20 @@ import {
   WifiConnectResult,
 } from '@alina/shared';
 
-const APPROVED_APPS = new Set(['calc', 'notepad', 'code', 'explorer', 'terminal', 'mspaint']);
+const APPROVED_APPS = new Set([
+  'camera',
+  'calc',
+  'calculator',
+  'notepad',
+  'code',
+  'explorer',
+  'terminal',
+  'wt',
+  'mspaint',
+  'paint',
+  'browser',
+  'edge',
+]);
 const DANGEROUS_TOKENS = ['|', '>', '<', '&', ';', '`', '$', '%', 'rmdir', 'del', 'format', 'powershell', 'cmd.exe', '/c'];
 
 export class NativeDesktopClient {

@@ -13,7 +13,20 @@ import {
 } from '@alina/shared';
 
 // Whitelist matching Rust commands/app_launcher.rs
-const APPROVED_APPS = new Set(['calc', 'notepad', 'code', 'explorer', 'terminal', 'mspaint']);
+const APPROVED_APPS = new Set([
+  'camera',
+  'calc',
+  'calculator',
+  'notepad',
+  'code',
+  'explorer',
+  'terminal',
+  'wt',
+  'mspaint',
+  'paint',
+  'browser',
+  'edge',
+]);
 const DANGEROUS_TOKENS = ['|', '>', '<', '&', ';', '`', '$', '%', 'rmdir', 'del', 'format', 'powershell', 'cmd.exe', '/c'];
 
 export interface INativeBridge {
@@ -112,8 +125,47 @@ export class TauriNativeBridge implements INativeBridge {
       }
     }
 
-    // Node / Headless driver execution
-    const pid = Math.floor(1000 + Math.random() * 9000);
+    // Node / Dev Server Host execution
+    let pid = Math.floor(1000 + Math.random() * 9000);
+    try {
+      const childProcess = await import('child_process');
+      let child;
+      if (process.platform === 'win32') {
+        if (cleanName === 'camera') {
+          child = childProcess.spawn('explorer.exe', ['microsoft.windows.camera:'], { detached: true, stdio: 'ignore' });
+        } else if (cleanName === 'calc' || cleanName === 'calculator') {
+          child = childProcess.spawn('calc.exe', args, { detached: true, stdio: 'ignore' });
+        } else if (cleanName === 'notepad') {
+          child = childProcess.spawn('notepad.exe', args, { detached: true, stdio: 'ignore' });
+        } else if (cleanName === 'mspaint' || cleanName === 'paint') {
+          child = childProcess.spawn('mspaint.exe', args, { detached: true, stdio: 'ignore' });
+        } else if (cleanName === 'explorer') {
+          child = childProcess.spawn('explorer.exe', args, { detached: true, stdio: 'ignore' });
+        } else if (cleanName === 'terminal' || cleanName === 'wt') {
+          child = childProcess.spawn('cmd.exe', ['/c', 'start', 'cmd.exe'], { detached: true, stdio: 'ignore' });
+        } else if (cleanName === 'code') {
+          child = childProcess.spawn('cmd.exe', ['/c', 'code', ...args], { detached: true, stdio: 'ignore' });
+        } else if (cleanName === 'browser' || cleanName === 'edge') {
+          child = childProcess.spawn('explorer.exe', ['microsoft-edge:'], { detached: true, stdio: 'ignore' });
+        } else {
+          child = childProcess.spawn(cleanName, args, { detached: true, stdio: 'ignore' });
+        }
+      } else if (process.platform === 'darwin') {
+        const macApp = cleanName === 'camera' ? 'Photo Booth' : cleanName === 'calc' || cleanName === 'calculator' ? 'Calculator' : cleanName === 'notepad' ? 'TextEdit' : cleanName;
+        child = childProcess.spawn('open', ['-a', macApp, ...args], { detached: true, stdio: 'ignore' });
+      } else {
+        const linuxApp = cleanName === 'camera' ? 'cheese' : cleanName;
+        child = childProcess.spawn(linuxApp, args, { detached: true, stdio: 'ignore' });
+      }
+
+      if (child && child.pid) {
+        pid = child.pid;
+        child.unref();
+      }
+    } catch (spawnErr) {
+      console.warn(`[TauriNativeBridge] Host spawn notice: ${spawnErr instanceof Error ? spawnErr.message : String(spawnErr)}`);
+    }
+
     const auditEvent = this.recordAudit(
       `launch_application:${cleanName}`,
       'RequiresApproval',

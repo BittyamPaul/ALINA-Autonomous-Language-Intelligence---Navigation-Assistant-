@@ -367,7 +367,7 @@ export default function AlinaHomePage() {
 
   // Voice & Persona Settings State
   const [voiceEnabled, setVoiceEnabled] = useState(true);
-  const [wakeWordEnabled, setWakeWordEnabled] = useState(false);
+  const [wakeWordEnabled, setWakeWordEnabled] = useState(true);
   const [voiceSpeed, setVoiceSpeed] = useState(1.0);
   const [voiceVolume, setVoiceVolume] = useState(1.0);
   const [selectedVoiceId, setSelectedVoiceId] = useState<string | undefined>();
@@ -376,7 +376,7 @@ export default function AlinaHomePage() {
   // Handle Voice Interaction
   const {
     voiceState,
-    mode: voiceMode,
+    mode: _voiceMode,
     activityState: voiceActivityState,
     session: _voiceSession,
     isConversationActive,
@@ -453,16 +453,34 @@ export default function AlinaHomePage() {
     addToast('Objective Planned', `Formulated execution plan for "${goalText.slice(0, 35)}..."`, 'success');
 
     let finalTaskId = tempId;
+    const isAppLaunch = /\b(open|launch|start|run)\s+(camera|webcam|photo|calc|calculator|notepad|paint|mspaint|terminal|cmd|code|browser|edge)\b/i.test(goalText) ||
+      /\b(camera|webcam|calculator|notepad|mspaint)\b/i.test(goalText);
+    const isBrowse = /\b(browse|http:\/\/|https:\/\/)\b/i.test(goalText);
+
+    const initialToolName = isAppLaunch ? 'computer_launch_app' : isBrowse ? 'browser_navigate' : 'fs_read_file';
+    const initialSteps = isAppLaunch
+      ? [
+          { title: 'Decompose and analyze application target', toolName: 'core_planner' },
+          { title: 'Assert native execution whitelist', toolName: 'security_gate' },
+          { title: 'Launch application in host operating system', toolName: 'computer_launch_app' },
+        ]
+      : isBrowse
+      ? [
+          { title: 'Parse target web URL and assert safe domain', toolName: 'core_planner' },
+          { title: 'Navigate browser page securely', toolName: 'browser_navigate' },
+        ]
+      : [
+          { title: 'Decompose and analyze goal parameters', toolName: 'core_planner' },
+          { title: 'Assert sandbox PathJail physical boundaries', toolName: 'fs_validate_jail' },
+          { title: 'Execute primary operation', toolName: 'fs_read_file' },
+        ];
+
     try {
       const res = await alinaApi.tasks.create({
         goal: goalText,
         workspaceId: 'ws_alina_main',
         riskLevel: mode === 'ask_always' ? 'HIGH_DESTRUCTIVE' : 'LOW',
-        steps: [
-          { title: 'Decompose and analyze goal parameters', toolName: 'core_planner' },
-          { title: 'Assert sandbox PathJail physical boundaries', toolName: 'fs_validate_jail' },
-          { title: 'Execute primary operation', toolName: 'fs_read_file' },
-        ],
+        steps: initialSteps,
       });
       if (res.success && res.data?.task?.id) {
         finalTaskId = res.data.task.id;
@@ -482,7 +500,7 @@ export default function AlinaHomePage() {
               ...t,
               status: 'executing',
               completedSteps: 2,
-              currentAction: 'Executing verified tool steps in PathJail sandbox...',
+              currentAction: isAppLaunch ? 'Launching host application...' : 'Executing verified tool steps in PathJail sandbox...',
             }
           : t
       )
@@ -492,6 +510,7 @@ export default function AlinaHomePage() {
       const execRes = await alinaApi.tasks.execute(finalTaskId, {
         goal: goalText,
         workspaceId: 'ws_alina_main',
+        isApprovalGranted: mode === 'verify_and_execute',
       });
 
       if (execRes.success && execRes.data) {
@@ -513,10 +532,10 @@ export default function AlinaHomePage() {
           setSteps((prev) => [
             {
               id: `step-complete-${Date.now()}`,
-              title: `Completed: ${result.resultSummary.slice(0, 50)}`,
-              toolName: 'task_verifier',
+              title: `${result.resultSummary.slice(0, 60)}`,
+              toolName: initialToolName,
               status: 'completed',
-              risk: 'LOW',
+              risk: isAppLaunch ? 'HIGH' : 'LOW',
               verification: 'verified',
               timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
               output: result.resultSummary,
@@ -857,11 +876,28 @@ export default function AlinaHomePage() {
                       <span>CONVERSATION ACTIVE</span>
                     </span>
                   )}
-                  {voiceMode === 'wake_mode' && isWakeWordListening && !isConversationActive && (
-                    <span className="text-[10px] font-mono text-stone-500 dark:text-stone-400 px-1.5 py-0.5 rounded bg-stone-100 dark:bg-stone-800">
-                      WAKE MODE: &quot;Hey Alina&quot;
-                    </span>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = !wakeWordEnabled;
+                      setWakeWordEnabled(next);
+                      toggleWakeWord(next);
+                      addToast(
+                        next ? 'Wake Word Enabled' : 'Wake Word Disabled',
+                        next ? 'Listening continuously for "Hey Alina" across tabs' : 'Wake word listener paused.',
+                        'info'
+                      );
+                    }}
+                    className={`flex items-center space-x-1.5 text-[10px] font-mono font-medium px-2 py-0.5 rounded-full border transition-all cursor-pointer ${
+                      wakeWordEnabled
+                        ? 'bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+                        : 'bg-stone-100 dark:bg-stone-800 text-stone-500 border-stone-300 dark:border-stone-700'
+                    }`}
+                    title="Click to toggle continuous 'Hey Alina' microphone listening across tabs"
+                  >
+                    <span className={`w-1.5 h-1.5 rounded-full ${wakeWordEnabled ? 'bg-emerald-500 animate-pulse' : 'bg-stone-400'}`} />
+                    <span>{wakeWordEnabled ? 'MIC: "Hey Alina" (ACTIVE)' : 'MIC: Wake Word (OFF)'}</span>
+                  </button>
                 </div>
                 {transcriptDebugMode && transcriptQuality && (
                   <span className="text-[10px] font-mono text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">

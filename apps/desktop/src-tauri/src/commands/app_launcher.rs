@@ -50,10 +50,47 @@ pub fn launch_application(payload: LaunchAppPayload) -> Result<LaunchAppResult, 
         }
     }
 
-    let mut cmd = Command::new(&valid_app);
-    for arg in &args {
-        cmd.arg(arg);
-    }
+    let mut cmd = if valid_app == "camera" {
+        #[cfg(target_os = "windows")]
+        {
+            let mut c = Command::new("explorer");
+            c.arg("microsoft.windows.camera:");
+            c
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let mut c = Command::new("open");
+            c.args(["-a", "Photo Booth"]);
+            c
+        }
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        {
+            Command::new("cheese")
+        }
+    } else if valid_app == "browser" || valid_app == "edge" {
+        #[cfg(target_os = "windows")]
+        {
+            let mut c = Command::new("explorer");
+            c.arg("microsoft-edge:");
+            c
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let mut c = Command::new("open");
+            c.args(["-a", "Safari"]);
+            c
+        }
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        {
+            Command::new("xdg-open")
+        }
+    } else {
+        let mut c = Command::new(&valid_app);
+        for arg in &args {
+            c.arg(arg);
+        }
+        c
+    };
 
     match cmd.spawn() {
         Ok(child) => {

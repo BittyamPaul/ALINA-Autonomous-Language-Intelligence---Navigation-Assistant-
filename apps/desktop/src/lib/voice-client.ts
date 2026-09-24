@@ -573,6 +573,9 @@ export class AlinaWakeWordDetector {
   private onDetected?: (event: WakeWordEvent) => void;
   private onError?: (err: Error) => void;
   private restartTimeout: ReturnType<typeof setTimeout> | null = null;
+  private audioStream: MediaStream | null = null;
+  private audioContext: AudioContext | null = null;
+  private visibilityHandler: (() => void) | null = null;
 
   constructor(options: WakeWordDetectorOptions = {}) {
     this.triggerPhrase = (options.triggerPhrase || 'hey alina').toLowerCase();
@@ -640,12 +643,55 @@ export class AlinaWakeWordDetector {
             }, 300);
           }
         };
+
+        // Resume speech recognition when returning to the tab or window focus
+        this.visibilityHandler = () => {
+          if (this.active && this.recognition) {
+            try {
+              this.recognition.start();
+            } catch {
+              // Recognition already active
+            }
+          }
+        };
+        document.addEventListener('visibilitychange', this.visibilityHandler);
+        window.addEventListener('focus', this.visibilityHandler);
       } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err));
         if (this.onError) {
           this.onError(error);
         }
       }
+    }
+  }
+
+  /**
+   * Acquire a background MediaStream and zero-gain AudioContext destination.
+   * This signals the browser to keep the audio subsystem active across tab switching.
+   */
+  private async acquireBackgroundKeepAlive(): Promise<void> {
+    if (typeof window === 'undefined' || typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+      return;
+    }
+    try {
+      if (!this.audioStream) {
+        this.audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const win = window as unknown as { AudioContext?: typeof AudioContext; webkitAudioContext?: typeof AudioContext };
+        const AudioCtx = win.AudioContext || win.webkitAudioContext;
+        if (AudioCtx) {
+          this.audioContext = new AudioCtx();
+          const source = this.audioContext.createMediaStreamSource(this.audioStream);
+          const silentGain = this.audioContext.createGain();
+          silentGain.gain.value = 0.0;
+          source.connect(silentGain);
+          silentGain.connect(this.audioContext.destination);
+          if (this.audioContext.state === 'suspended') {
+            await this.audioContext.resume().catch(() => {});
+          }
+        }
+      }
+    } catch {
+      // Graceful fallback if getUserMedia not granted yet
     }
   }
 
@@ -673,6 +719,7 @@ export class AlinaWakeWordDetector {
   public start(): void {
     if (!this.recognition || this.active) return;
     this.active = true;
+    void this.acquireBackgroundKeepAlive();
     try {
       this.recognition.start();
     } catch {
@@ -692,6 +739,19 @@ export class AlinaWakeWordDetector {
       } catch {
         // Ignore
       }
+    }
+    if (this.visibilityHandler) {
+      document.removeEventListener('visibilitychange', this.visibilityHandler);
+      window.removeEventListener('focus', this.visibilityHandler);
+      this.visibilityHandler = null;
+    }
+    if (this.audioStream) {
+      this.audioStream.getTracks().forEach((track) => track.stop());
+      this.audioStream = null;
+    }
+    if (this.audioContext) {
+      void this.audioContext.close().catch(() => {});
+      this.audioContext = null;
     }
   }
 

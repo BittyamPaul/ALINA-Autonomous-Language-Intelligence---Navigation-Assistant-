@@ -518,6 +518,12 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions) {
             } else {
               if (modeRef.current === 'conversation_mode') {
                 resetInactivityTimer();
+                // Continuous conversation loop: automatically resume listening after momentary silence or background blur
+                setTimeout(() => {
+                  if (modeRef.current === 'conversation_mode' && !sttRef.current?.isCurrentlyListening()) {
+                    void startListening();
+                  }
+                }, 250);
               } else {
                 setVoiceState('idle');
                 updateActivityState('idle');
@@ -611,14 +617,28 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions) {
     };
     window.addEventListener('keydown', handleKeyDown);
 
+    // Cross-tab resilience: resume listening when user returns or refocuses tab
+    const handleTabRefocus = () => {
+      if (modeRef.current === 'conversation_mode' && !sttRef.current?.isCurrentlyListening()) {
+        void startListening();
+      } else if (modeRef.current === 'wake_mode' && options?.wakeWordEnabled && wakeWordRef.current && !wakeWordRef.current.isListening()) {
+        wakeWordRef.current.start();
+        setIsWakeWordListening(true);
+      }
+    };
+    document.addEventListener('visibilitychange', handleTabRefocus);
+    window.addEventListener('focus', handleTabRefocus);
+
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('visibilitychange', handleTabRefocus);
+      window.removeEventListener('focus', handleTabRefocus);
       clearInactivityTimers();
       ttsRef.current?.stop();
       sttRef.current?.abort();
       wakeWordRef.current?.stop();
     };
-  }, [options?.voiceId, options?.silenceTimeoutMs, updateActivityState, endConversation, interrupt, clearInactivityTimers]);
+  }, [options?.voiceId, options?.silenceTimeoutMs, options?.wakeWordEnabled, updateActivityState, endConversation, interrupt, clearInactivityTimers, startListening]);
 
   // Wake-word ("Hey Alina") initialization & background listener
   useEffect(() => {
