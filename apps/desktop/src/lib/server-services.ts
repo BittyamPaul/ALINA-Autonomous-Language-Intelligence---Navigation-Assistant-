@@ -16,6 +16,7 @@ import {
   createSuccessResponse,
   createErrorResponse,
   PersonalOsEngine,
+  NetworkReadinessService,
 } from '@alina/agent';
 import { PersonalContextRepository } from '@alina/database';
 import { createDefaultToolRegistry, createAlinaMcpToolRegistry } from '@alina/tools';
@@ -88,6 +89,16 @@ export async function getSupervisorAgent(): Promise<AlinaSupervisorAgent> {
     });
   }
   return supervisorAgent;
+}
+
+let networkReadinessService: NetworkReadinessService | null = null;
+
+export async function getNetworkReadinessService(): Promise<NetworkReadinessService> {
+  if (!networkReadinessService) {
+    const { db } = await getServerServices();
+    networkReadinessService = new NetworkReadinessService({ dbClient: db });
+  }
+  return networkReadinessService;
 }
 
 export function handleApiSuccess<T>(data: T, startTime = Date.now()) {
