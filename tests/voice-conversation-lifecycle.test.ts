@@ -274,6 +274,22 @@ describe('ALINA Voice Conversation Lifecycle: Wake Mode & Continuous Conversatio
   // 4. Wake-Word Extraction & Immediate Command Handling
   // =========================================================================
   describe('4. Wake-Word Extraction & Immediate Command Handling', () => {
+    it('extracts command when user speaks "Hey Subject, open my project"', () => {
+      const singleUtterance = 'Hey Subject, open my project';
+      const parsed = extractCommandAfterWakeWord(singleUtterance);
+
+      expect(parsed.isWake).toBe(true);
+      expect(parsed.command).toBe('open my project');
+    });
+
+    it('handles standalone "Hey Subject" wake invocation', () => {
+      const standalone = 'Hey Subject';
+      const parsed = extractCommandAfterWakeWord(standalone);
+
+      expect(parsed.isWake).toBe(true);
+      expect(parsed.command).toBeUndefined();
+    });
+
     it('extracts command when user speaks "Hey Alina, open my project"', () => {
       const singleUtterance = 'Hey Alina, open my project';
       const parsed = extractCommandAfterWakeWord(singleUtterance);

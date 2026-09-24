@@ -12,6 +12,8 @@
     "clean": "turbo clean",
     "db:init": "pnpm --filter @alina/database db:init",
     "db:seed": "pnpm --filter @alina/database db:seed",
+    "desktop:dev": "pnpm --filter @alina/desktop tauri dev",
+    "desktop:build": "pnpm --filter @alina/desktop tauri build",
     "docker:dev": "docker compose -f docker-compose.yml -f docker-compose.dev.yml up",
     "docker:prod": "docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d",
     "docker:build": "docker compose build",

@@ -867,11 +867,24 @@ export function isTerminationPhrase(phrase: string): boolean {
  */
 export function extractCommandAfterWakeWord(
   transcript: string,
-  wakePhrase = 'hey alina'
+  wakePhrase = 'hey subject'
 ): { isWake: boolean; command?: string } {
   const clean = transcript.trim();
   const lower = clean.toLowerCase();
-  const wakeVariants = [wakePhrase.toLowerCase(), 'hey alina', 'alina', 'hey aleena', 'hey elena', 'hi alina'];
+  const wakeVariants = [
+    wakePhrase.toLowerCase(),
+    'hey subject',
+    'subject',
+    'hi subject',
+    'hello subject',
+    'ok subject',
+    'okay subject',
+    'hey alina',
+    'alina',
+    'hey aleena',
+    'hey elena',
+    'hi alina',
+  ];
 
   for (const variant of wakeVariants) {
     if (lower.startsWith(variant)) {

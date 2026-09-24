@@ -568,7 +568,7 @@ export interface WakeWordDetectorOptions {
 export class AlinaWakeWordDetector {
   private recognition: ISpeechRecognitionInstance | null = null;
   private active = false;
-  private triggerPhrase = 'hey alina';
+  private triggerPhrase = 'hey subject';
   private sensitivity = 0.7;
   private onDetected?: (event: WakeWordEvent) => void;
   private onError?: (err: Error) => void;
@@ -578,7 +578,7 @@ export class AlinaWakeWordDetector {
   private visibilityHandler: (() => void) | null = null;
 
   constructor(options: WakeWordDetectorOptions = {}) {
-    this.triggerPhrase = (options.triggerPhrase || 'hey alina').toLowerCase();
+    this.triggerPhrase = (options.triggerPhrase || 'hey subject').toLowerCase();
     this.sensitivity = options.sensitivity ?? 0.7;
     this.onDetected = options.onDetected;
     this.onError = options.onError;
@@ -703,6 +703,12 @@ export class AlinaWakeWordDetector {
     }
 
     const phoneticVariants = [
+      'hey subject',
+      'subject',
+      'hi subject',
+      'hello subject',
+      'ok subject',
+      'okay subject',
       'hey alina',
       'hey elena',
       'hey aleena',
@@ -791,11 +797,24 @@ export function isTerminationPhrase(phrase: string): boolean {
 
 export function extractCommandAfterWakeWord(
   transcript: string,
-  wakePhrase = 'hey alina'
+  wakePhrase = 'hey subject'
 ): { isWake: boolean; command?: string } {
   const clean = transcript.trim();
   const lower = clean.toLowerCase();
-  const wakeVariants = [wakePhrase.toLowerCase(), 'hey alina', 'alina', 'hey aleena', 'hey elena', 'hi alina'];
+  const wakeVariants = [
+    wakePhrase.toLowerCase(),
+    'hey subject',
+    'subject',
+    'hi subject',
+    'hello subject',
+    'ok subject',
+    'okay subject',
+    'hey alina',
+    'alina',
+    'hey aleena',
+    'hey elena',
+    'hi alina',
+  ];
 
   for (const variant of wakeVariants) {
     if (lower.startsWith(variant)) {

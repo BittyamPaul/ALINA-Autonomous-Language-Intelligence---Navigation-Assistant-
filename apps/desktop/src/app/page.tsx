@@ -866,7 +866,7 @@ export default function AlinaHomePage() {
                         : voiceState === 'error'
                         ? 'Voice Fallback Active'
                         : isWakeWordListening
-                        ? 'Listening for "Hey Alina"...'
+                        ? 'Listening for "Hey Subject"...'
                         : 'ALINA Ready'
                     }
                   />
@@ -884,7 +884,7 @@ export default function AlinaHomePage() {
                       toggleWakeWord(next);
                       addToast(
                         next ? 'Wake Word Enabled' : 'Wake Word Disabled',
-                        next ? 'Listening continuously for "Hey Alina" across tabs' : 'Wake word listener paused.',
+                        next ? 'Listening continuously for "Hey Subject" across tabs' : 'Wake word listener paused.',
                         'info'
                       );
                     }}
@@ -893,10 +893,10 @@ export default function AlinaHomePage() {
                         ? 'bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
                         : 'bg-stone-100 dark:bg-stone-800 text-stone-500 border-stone-300 dark:border-stone-700'
                     }`}
-                    title="Click to toggle continuous 'Hey Alina' microphone listening across tabs"
+                    title="Click to toggle continuous 'Hey Subject' microphone listening across tabs"
                   >
                     <span className={`w-1.5 h-1.5 rounded-full ${wakeWordEnabled ? 'bg-emerald-500 animate-pulse' : 'bg-stone-400'}`} />
-                    <span>{wakeWordEnabled ? 'MIC: "Hey Alina" (ACTIVE)' : 'MIC: Wake Word (OFF)'}</span>
+                    <span>{wakeWordEnabled ? 'MIC: "Hey Subject" (ACTIVE)' : 'MIC: Wake Word (OFF)'}</span>
                   </button>
                 </div>
                 {transcriptDebugMode && transcriptQuality && (

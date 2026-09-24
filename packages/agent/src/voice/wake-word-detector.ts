@@ -23,14 +23,14 @@ export class AlinaWakeWordDetector implements WakeWordProvider {
   public readonly providerName = 'alina_wake_word_detector';
   private recognition: any = null;
   private active = false;
-  private triggerPhrase = 'hey alina';
+  private triggerPhrase = 'hey subject';
   private sensitivity = 0.7;
   private detectedListeners: Array<(event: WakeWordEvent) => void> = [];
   private errorListeners: Array<(err: Error) => void> = [];
   private restartTimeout: ReturnType<typeof setTimeout> | null = null;
 
   constructor(options: WakeWordDetectorOptions = {}) {
-    this.triggerPhrase = (options.triggerPhrase || 'hey alina').toLowerCase();
+    this.triggerPhrase = (options.triggerPhrase || 'hey subject').toLowerCase();
     this.sensitivity = options.sensitivity ?? 0.7;
     if (options.onDetected) {
       this.detectedListeners.push(options.onDetected);
@@ -166,8 +166,18 @@ export class AlinaWakeWordDetector implements WakeWordProvider {
       return true;
     }
 
-    // Common phonetic variants when users say "Hey Alina" or "Alina"
-    const variants = ['hey alina', 'alina', 'hey aleena', 'hey elena', 'hi alina'];
+    // Common phonetic variants when users say "Hey Subject", "Subject", or legacy "Hey Alina"
+    const variants = [
+      'hey subject',
+      'subject',
+      'hi subject',
+      'hello subject',
+      'hey alina',
+      'alina',
+      'hey aleena',
+      'hey elena',
+      'hi alina',
+    ];
     return variants.some((v) => clean.includes(v));
   }
 
